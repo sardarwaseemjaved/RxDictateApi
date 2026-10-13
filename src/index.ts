@@ -3,12 +3,17 @@ import type { Server } from 'http';
 import app from './app';
 import config from './config/config';
 import logger from './config/logger';
+import { syncCollections } from './models';
 
 let server: Server | undefined;
 
 const start = async (): Promise<void> => {
   await mongoose.connect(config.mongoose.url);
   logger.info('Connected to MongoDB');
+
+  // Every collection and index exists from the first boot, including the ones
+  // no route touches yet.
+  await syncCollections();
 
   server = app.listen(config.port, () => {
     logger.info(`Listening to port ${config.port}`);

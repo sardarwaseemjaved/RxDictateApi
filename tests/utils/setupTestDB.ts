@@ -1,11 +1,13 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { syncCollections } from '../../src/models';
 
 /**
  * An in-memory mongod per test file.
  *
- * Hermetic on purpose: the suite must pass on a laptop with no mongod installed
- * and in CI without a service container.
+ * Hermetic on purpose: the suite must pass on a laptop with no mongod
+ * installed and in CI without a service container. Indexes are built once, so
+ * the unique and text indexes the code relies on are actually exercised.
  */
 const setupTestDB = (): void => {
   let mongod: MongoMemoryServer;
@@ -13,6 +15,7 @@ const setupTestDB = (): void => {
   beforeAll(async () => {
     mongod = await MongoMemoryServer.create();
     await mongoose.connect(mongod.getUri());
+    await syncCollections();
   }, 120_000);
 
   beforeEach(async () => {
