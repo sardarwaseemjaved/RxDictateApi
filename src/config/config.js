@@ -18,11 +18,18 @@ const envVarsSchema = Joi.object()
     JWT_VERIFY_EMAIL_EXPIRATION_MINUTES: Joi.number()
       .default(10)
       .description('minutes after which verify email token expires'),
-    SMTP_HOST: Joi.string().description('server that will send the emails'),
-    SMTP_PORT: Joi.number().description('port to connect to the email server'),
-    SMTP_USERNAME: Joi.string().description('username for email server'),
-    SMTP_PASSWORD: Joi.string().description('password for email server'),
-    EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
+    PASSCODE_EXPIRATION_MINUTES: Joi.number().default(10).description('minutes after which a login passcode expires'),
+    PASSCODE_MAX_ATTEMPTS: Joi.number().default(5).description('wrong guesses allowed before a passcode is burned'),
+    PASSCODE_LOG_IN_DEV: Joi.boolean()
+      .default(true)
+      .description('in development, log each passcode and return it as devPassCode'),
+    // Email is optional: a blank value means "no SMTP configured" rather than a
+    // config error, so the API boots on a machine that cannot send mail.
+    SMTP_HOST: Joi.string().allow('').description('server that will send the emails'),
+    SMTP_PORT: Joi.number().allow('').description('port to connect to the email server'),
+    SMTP_USERNAME: Joi.string().allow('').description('username for email server'),
+    SMTP_PASSWORD: Joi.string().allow('').description('password for email server'),
+    EMAIL_FROM: Joi.string().allow('').description('the from field in the emails sent by the app'),
   })
   .unknown();
 
@@ -49,6 +56,13 @@ module.exports = {
     refreshExpirationDays: envVars.JWT_REFRESH_EXPIRATION_DAYS,
     resetPasswordExpirationMinutes: envVars.JWT_RESET_PASSWORD_EXPIRATION_MINUTES,
     verifyEmailExpirationMinutes: envVars.JWT_VERIFY_EMAIL_EXPIRATION_MINUTES,
+  },
+  passcode: {
+    expirationMinutes: envVars.PASSCODE_EXPIRATION_MINUTES,
+    maxAttempts: envVars.PASSCODE_MAX_ATTEMPTS,
+    // Outside development this stays false regardless of the env var, so a
+    // passcode is never returned to the caller in production.
+    exposeInResponse: envVars.NODE_ENV === 'development' && envVars.PASSCODE_LOG_IN_DEV,
   },
   email: {
     smtp: {

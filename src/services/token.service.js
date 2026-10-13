@@ -13,14 +13,16 @@ const { tokenTypes } = require('../config/tokens');
  * @param {Moment} expires
  * @param {string} type
  * @param {string} [secret]
+ * @param {Object} [claims] - extra payload claims, e.g. { scope: 'app' }
  * @returns {string}
  */
-const generateToken = (userId, expires, type, secret = config.jwt.secret) => {
+const generateToken = (userId, expires, type, secret = config.jwt.secret, claims = {}) => {
   const payload = {
     sub: userId,
     iat: moment().unix(),
     exp: expires.unix(),
     type,
+    ...claims,
   };
   return jwt.sign(payload, secret);
 };
@@ -86,6 +88,38 @@ const generateAuthTokens = async (user) => {
 };
 
 /**
+ * Generate auth tokens for a mobile-app account.
+ *
+ * Carries scope: 'app' so these cannot be used against the /v1/users routes,
+ * whose passport strategy resolves sub against the User collection instead.
+ * @param {AppUser} appUser
+ * @returns {Promise<Object>}
+ */
+const generateAppAuthTokens = async (appUser) => {
+  const accessTokenExpires = moment().add(config.jwt.accessExpirationMinutes, 'minutes');
+  const accessToken = generateToken(appUser.id, accessTokenExpires, tokenTypes.ACCESS, config.jwt.secret, {
+    scope: 'app',
+  });
+
+  const refreshTokenExpires = moment().add(config.jwt.refreshExpirationDays, 'days');
+  const refreshToken = generateToken(appUser.id, refreshTokenExpires, tokenTypes.REFRESH, config.jwt.secret, {
+    scope: 'app',
+  });
+  await saveToken(refreshToken, appUser.id, refreshTokenExpires, tokenTypes.REFRESH);
+
+  return {
+    access: {
+      token: accessToken,
+      expires: accessTokenExpires.toDate(),
+    },
+    refresh: {
+      token: refreshToken,
+      expires: refreshTokenExpires.toDate(),
+    },
+  };
+};
+
+/**
  * Generate reset password token
  * @param {string} email
  * @returns {Promise<string>}
@@ -118,6 +152,7 @@ module.exports = {
   saveToken,
   verifyToken,
   generateAuthTokens,
+  generateAppAuthTokens,
   generateResetPasswordToken,
   generateVerifyEmailToken,
 };

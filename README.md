@@ -206,6 +206,32 @@ List of available routes:
 `POST /v1/auth/send-verification-email` - send verification email\
 `POST /v1/auth/verify-email` - verify email
 
+**Mobile app routes** (passcode auth for the `clinic-app` client):\
+`POST /v1/app-auth/is-registered` - check whether an email or phone has an account\
+`POST /v1/app-auth/send-passcode` - send a login passcode\
+`POST /v1/app-auth/send-registration-passcode` - send a registration passcode\
+`POST /v1/app-auth/verify-and-login` - exchange a passcode for auth tokens\
+`POST /v1/app-auth/register` - create an account with a passcode\
+`POST /v1/app-auth/register-social` - create or return a Google/Apple account\
+`POST /v1/app-auth/refresh-tokens` - refresh app auth tokens\
+`POST /v1/app-auth/me` - get the signed-in profile *(auth required)*\
+`POST /v1/app-auth/update-profile` - update the signed-in profile *(auth required)*\
+`POST /v1/app-auth/delete-account` - delete the signed-in account *(auth required)*
+
+These are separate from `/v1/auth` by design. `/v1/auth` is email+password over the
+`User` collection; `/v1/app-auth` is one-time-passcode over `AppUser`, whose field set
+mirrors the mobile client's user object. Their access tokens are not
+interchangeable: app tokens carry a `scope: "app"` claim and resolve against
+`AppUser`, so one family cannot be used against the other's routes.
+
+Every `/v1/app-auth` response is wrapped as
+`{ "status": { "result": true, "message": "" }, ... }`, which is the envelope the
+mobile client normalizes against.
+
+With `NODE_ENV=development` and `PASSCODE_LOG_IN_DEV=true`, the passcode is logged by
+the server and returned as `devPassCode` so a simulator can sign in without SMTP
+configured. Both conditions are required, so this never happens in production.
+
 **User routes**:\
 `POST /v1/users` - create a user\
 `GET /v1/users` - get all users\
