@@ -18,5 +18,13 @@
     "sourceMap": true,
     "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "ts-node": {
+    // ts-node compiles file by file and would otherwise ignore the ambient
+    // declarations in src/types - the 'xss-clean' module and the Request
+    // augmentation that carries req.auth and req.ctx. tsc and ts-jest build a
+    // whole program and pick them up, so without this `yarn dev` is the only
+    // thing that fails.
+    "files": true
+  }
 }
