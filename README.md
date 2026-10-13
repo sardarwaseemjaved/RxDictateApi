@@ -1,466 +1,385 @@
 # Clinic API
 
-[![Build Status](https://travis-ci.org/hagopj13/node-express-boilerplate.svg?branch=master)](https://travis-ci.org/hagopj13/node-express-boilerplate)
-[![Coverage Status](https://coveralls.io/repos/github/hagopj13/node-express-boilerplate/badge.svg?branch=master)](https://coveralls.io/github/hagopj13/node-express-boilerplate?branch=master)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
+The backend for a prescription-writing app for Pakistani doctors.
 
-A boilerplate/starter project for quickly building RESTful APIs using Node.js, Express, and Mongoose.
+The headline feature is voice dictation in mixed Urdu and English: the doctor
+dictates, speech-to-text transcribes, an extractor turns the transcript into
+_operations_, the server validates and applies those to a prescription draft,
+the doctor reviews and approves, and it prints as A4 on the clinic's letterhead.
 
-By running a single command, you will get a production-ready Node.js app installed and fully configured on your machine. The app comes with many built-in features, such as authentication using JWT, request validation, unit and integration tests, continuous integration, docker support, API documentation, pagination, etc. For more details, check the features list below.
+Three actors:
 
-## Quick Start
+- **doctor** — writes, approves, dictates, manages locations and staff
+- **PA (assistant)** — adds patients to today's list, prints approved prescriptions
+- **patient** — later, read-only
 
-To create a project, simply run:
+Built for one doctor today. Every record is scoped to a _practice_, so the same
+code serves a doctor with two locations, or a clinic with several doctors, without
+a migration. The UI never says "practice": to the doctor it is his clinic.
 
-```bash
-npx create-nodejs-express-app <project-name>
-```
+## Six rules the code is built around
 
-Or
+1. **`practiceId` on every record, filtered in one place.** `core/db/BaseRepository`
+   is the only thing that can build a query, and it applies the practice filter,
+   the location filter and soft delete itself. No route has to remember.
+2. **Soft delete on everything clinical** (`deletedAt`). Locations are _archived_,
+   never deleted, because approved prescriptions point at them.
+3. **An approved prescription is immutable.** Editing one creates version 2 with
+   `previousVersionId` set and marks version 1 `superseded`. Only a `draft` changes.
+4. **`letterheadSnapshot` is frozen onto the prescription at approval.** Changing a
+   location's address tomorrow cannot alter a page printed today.
+5. **Audit log on every write**, append-only.
+6. **Voice never writes to a prescription.** It produces `ops`, which the server
+   validates and applies. Typed edits go through the same function.
 
-```bash
-npm init nodejs-express-app <project-name>
-```
-
-## Manual Installation
-
-If you would still prefer to do the installation manually, follow these steps:
-
-Clone the repo:
-
-```bash
-git clone --depth 1 https://github.com/hagopj13/node-express-boilerplate.git
-cd node-express-boilerplate
-npx rimraf ./.git
-```
-
-Install the dependencies:
+## Getting started
 
 ```bash
 yarn install
-```
-
-Set the environment variables:
-
-```bash
-cp .env.example .env
-
-# open .env and modify the environment variables (if needed)
-```
-
-## Table of Contents
-
-- [Features](#features)
-- [Commands](#commands)
-- [Environment Variables](#environment-variables)
-- [Project Structure](#project-structure)
-- [API Documentation](#api-documentation)
-- [Error Handling](#error-handling)
-- [Validation](#validation)
-- [Authentication](#authentication)
-- [Authorization](#authorization)
-- [Logging](#logging)
-- [Custom Mongoose Plugins](#custom-mongoose-plugins)
-- [Linting](#linting)
-- [Contributing](#contributing)
-
-## Features
-
-- **NoSQL database**: [MongoDB](https://www.mongodb.com) object data modeling using [Mongoose](https://mongoosejs.com)
-- **Authentication and authorization**: using [passport](http://www.passportjs.org)
-- **Validation**: request data validation using [Joi](https://github.com/hapijs/joi)
-- **Logging**: using [winston](https://github.com/winstonjs/winston) and [morgan](https://github.com/expressjs/morgan)
-- **Testing**: unit and integration tests using [Jest](https://jestjs.io)
-- **Error handling**: centralized error handling mechanism
-- **API documentation**: with [swagger-jsdoc](https://github.com/Surnet/swagger-jsdoc) and [swagger-ui-express](https://github.com/scottie1984/swagger-ui-express)
-- **Process management**: advanced production process management using [PM2](https://pm2.keymetrics.io)
-- **Dependency management**: with [Yarn](https://yarnpkg.com)
-- **Environment variables**: using [dotenv](https://github.com/motdotla/dotenv) and [cross-env](https://github.com/kentcdodds/cross-env#readme)
-- **Security**: set security HTTP headers using [helmet](https://helmetjs.github.io)
-- **Santizing**: sanitize request data against xss and query injection
-- **CORS**: Cross-Origin Resource-Sharing enabled using [cors](https://github.com/expressjs/cors)
-- **Compression**: gzip compression with [compression](https://github.com/expressjs/compression)
-- **CI**: continuous integration with [Travis CI](https://travis-ci.org)
-- **Docker support**
-- **Code coverage**: using [coveralls](https://coveralls.io)
-- **Code quality**: with [Codacy](https://www.codacy.com)
-- **Git hooks**: with [husky](https://github.com/typicode/husky) and [lint-staged](https://github.com/okonet/lint-staged)
-- **Linting**: with [ESLint](https://eslint.org) and [Prettier](https://prettier.io)
-- **Editor config**: consistent editor configuration using [EditorConfig](https://editorconfig.org)
-
-## Commands
-
-Running locally:
-
-```bash
+cp .env.example .env       # then open .env and set JWT_SECRET and MONGODB_URL
 yarn dev
 ```
 
-Running in production:
+`yarn dev` runs TypeScript directly through ts-node and restarts on a change.
+The test suite needs no database of its own — it starts an in-memory mongod.
+
+### Commands
 
 ```bash
-yarn start
-```
+yarn dev            # development, with reload
+yarn build          # compile to dist/
+yarn start          # production, via pm2 (dist/index.js)
 
-Testing:
-
-```bash
-# run all tests
-yarn test
-
-# run all tests in watch mode
+yarn lint           # eslint, including prettier
+yarn lint:fix
+yarn typecheck      # tsc --noEmit
+yarn test           # jest
 yarn test:watch
-
-# run test coverage
 yarn coverage
-```
 
-Docker:
-
-```bash
-# run docker container in development mode
-yarn docker:dev
-
-# run docker container in production mode
+yarn docker:dev     # docker compose, with a mongo container
 yarn docker:prod
-
-# run all tests in a docker container
 yarn docker:test
 ```
 
-Linting:
+### Environment
 
-```bash
-# run ESLint
-yarn lint
+Copy `.env.example`. Everything is validated by zod at boot in
+[src/config/config.ts](src/config/config.ts), which fails fast rather than
+letting a missing variable become a runtime surprise. The full set:
 
-# fix ESLint errors
-yarn lint:fix
+| Variable                                    | Default        | Notes                                                      |
+| ------------------------------------------- | -------------- | ---------------------------------------------------------- |
+| `PORT`                                      | `3000`         |                                                            |
+| `MONGODB_URL`                               | —              | required; `-test` is appended when `NODE_ENV=test`         |
+| `JWT_SECRET`                                | —              | required, at least 16 characters                           |
+| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`           |                                                            |
+| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`           |                                                            |
+| `OTP_EXPIRATION_MINUTES`                    | `10`           |                                                            |
+| `OTP_MAX_ATTEMPTS`                          | `5`            | wrong guesses before the code is burned                    |
+| `OTP_COOLDOWN_SECONDS`                      | `60`           | per phone number, survives a restart                       |
+| `OTP_LOG_IN_DEV`                            | `true`         | outside production, return the code as `devCode`           |
+| `CORS_ORIGINS`                              | dev localhosts | comma separated; **required in production**                |
+| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`           |                                                            |
+| `RATE_LIMIT_MAX`                            | `300`          | the whole API                                              |
+| `AUTH_RATE_LIMIT_MAX`                       | `20`           | sign-in                                                    |
+| `OTP_RATE_LIMIT_MAX`                        | `5`            | keyed on the phone number, not the IP                      |
+| `STORAGE_DRIVER`                            | `local`        | `local` or `s3`                                            |
+| `STORAGE_LOCAL_DIR`                         | `.storage`     | for the `local` driver                                     |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —              | any S3 or R2 bucket                                        |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —              |                                                            |
+| `S3_FORCE_PATH_STYLE`                       | `true`         | needed by R2 and MinIO                                     |
+| `SIGNED_URL_TTL_SECONDS`                    | `300`          | audio and PDF links                                        |
+| `MAX_AUDIO_UPLOAD_MB`                       | `20`           | per dictation segment                                      |
+| `SMS_PROVIDER`                              | `log`          | sign-in codes and "you were added"                         |
+| `SMS_SENDER_ID`                             | `Clinic`       |                                                            |
+| `STT_PROVIDER`                              | `none`         | `none` or `mock`; see **Voice** below                      |
+| `LLM_PROVIDER`                              | `none`         | `none` or `mock`                                           |
+| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`        | a stalled segment is failed, not left hanging              |
+| `PDF_RENDERER_URL`                          | —              | an HTML-to-PDF service; without one the print file is HTML |
+| `AUDIO_RETENTION_DAYS`                      | `30`           | default for a new practice, days after approval            |
 
-# run prettier
-yarn prettier
-
-# fix prettier errors
-yarn prettier:fix
-```
-
-## Environment Variables
-
-The environment variables can be found and modified in the `.env` file. They come with these default values:
-
-```bash
-# Port number
-PORT=3000
-
-# URL of the Mongo DB
-MONGODB_URL=mongodb://127.0.0.1:27017/node-boilerplate
-
-# JWT
-# JWT secret key
-JWT_SECRET=thisisasamplesecret
-# Number of minutes after which an access token expires
-JWT_ACCESS_EXPIRATION_MINUTES=30
-# Number of days after which a refresh token expires
-JWT_REFRESH_EXPIRATION_DAYS=30
-
-# SMTP configuration options for the email service
-# For testing, you can use a fake SMTP service like Ethereal: https://ethereal.email/create
-SMTP_HOST=email-server
-SMTP_PORT=587
-SMTP_USERNAME=email-server-username
-SMTP_PASSWORD=email-server-password
-EMAIL_FROM=support@yourapp.com
-```
-
-## Project Structure
+## Layout
 
 ```
-src\
- |--config\         # Environment variables and configuration related things
- |--controllers\    # Route controllers (controller layer)
- |--docs\           # Swagger files
- |--middlewares\    # Custom express middlewares
- |--models\         # Mongoose models (data layer)
- |--routes\         # Routes
- |--services\       # Business logic (service layer)
- |--utils\          # Utility classes and functions
- |--validations\    # Request data validation schemas
- |--app.js          # Express app
- |--index.js        # App entry point
+src/
+  shared/          zod schemas + inferred types - the wire contract, imported by the app too
+  core/
+    db/            BaseRepository: the only query builder, with the practice filter
+    tenancy/       resolvePractice (X-Practice-Id), resolveLocation (X-Location-Id)
+    permissions/   can(role, action) - one table
+    errors/        AppError and the fixed error-code enum
+    events/        a typed EventEmitter bus
+    audit/         the append-only write log
+    storage/       S3/R2 and local drivers, signed URLs
+    sms/           provider adapter
+  config/          zod-validated env, winston, morgan
+  models/          the 18 collections, their indexes, and syncCollections()
+  services/        the work
+  controllers/     thin: call a service, send the envelope
+  routes/v1/       every route, with its middleware chain spelled out
+  validations/     request wiring: shared schemas assembled per route
+  middlewares/     requestId, requireAuth, validate, rateLimiter, error, notImplemented
+  listeners/       what an event causes - notifications, SMS
+  utils/
+tests/
+  integration/     through the app, over HTTP
+  unit/            pure logic
+  fixtures/        sign-in and clinic helpers
 ```
 
-## API Documentation
+`src/shared` is the single source of truth for every shape that crosses the wire.
+It imports nothing but zod — no express, no mongoose, no node built-ins — because
+the React Native app imports it too. Change a prescription section there and both
+sides change at once; that is the whole point of the folder.
 
-To view the list of available APIs and their specifications, run the server and go to `http://localhost:3000/v1/docs` in your browser. This documentation page is automatically generated using the [swagger](https://swagger.io/) definitions written as comments in the route files.
+## The request pipeline
 
-### API Endpoints
-
-List of available routes:
-
-**Auth routes**:\
-`POST /v1/auth/register` - register\
-`POST /v1/auth/login` - login\
-`POST /v1/auth/refresh-tokens` - refresh auth tokens\
-`POST /v1/auth/forgot-password` - send reset password email\
-`POST /v1/auth/reset-password` - reset password\
-`POST /v1/auth/send-verification-email` - send verification email\
-`POST /v1/auth/verify-email` - verify email
-
-**Mobile app routes** (passcode auth for the `clinic-app` client):\
-`POST /v1/app-auth/is-registered` - check whether an email or phone has an account\
-`POST /v1/app-auth/send-passcode` - send a login passcode\
-`POST /v1/app-auth/send-registration-passcode` - send a registration passcode\
-`POST /v1/app-auth/verify-and-login` - exchange a passcode for auth tokens\
-`POST /v1/app-auth/register` - create an account with a passcode\
-`POST /v1/app-auth/register-social` - create or return a Google/Apple account\
-`POST /v1/app-auth/refresh-tokens` - refresh app auth tokens\
-`POST /v1/app-auth/me` - get the signed-in profile *(auth required)*\
-`POST /v1/app-auth/update-profile` - update the signed-in profile *(auth required)*\
-`POST /v1/app-auth/delete-account` - delete the signed-in account *(auth required)*
-
-These are separate from `/v1/auth` by design. `/v1/auth` is email+password over the
-`User` collection; `/v1/app-auth` is one-time-passcode over `AppUser`, whose field set
-mirrors the mobile client's user object. Their access tokens are not
-interchangeable: app tokens carry a `scope: "app"` claim and resolve against
-`AppUser`, so one family cannot be used against the other's routes.
-
-Every `/v1/app-auth` response is wrapped as
-`{ "status": { "result": true, "message": "" }, ... }`, which is the envelope the
-mobile client normalizes against.
-
-With `NODE_ENV=development` and `PASSCODE_LOG_IN_DEV=true`, the passcode is logged by
-the server and returned as `devPassCode` so a simulator can sign in without SMTP
-configured. Both conditions are required, so this never happens in production.
-
-**User routes**:\
-`POST /v1/users` - create a user\
-`GET /v1/users` - get all users\
-`GET /v1/users/:userId` - get user\
-`PATCH /v1/users/:userId` - update user\
-`DELETE /v1/users/:userId` - delete user
-
-## Error Handling
-
-The app has a centralized error handling mechanism.
-
-Controllers should try to catch the errors and forward them to the error handling middleware (by calling `next(error)`). For convenience, you can also wrap the controller inside the catchAsync utility wrapper, which forwards the error.
-
-```javascript
-const catchAsync = require('../utils/catchAsync');
-
-const controller = catchAsync(async (req, res) => {
-  // this error will be forwarded to the error handling middleware
-  throw new Error('Something wrong happened');
-});
+```
+requestId → logger → rateLimit → requireAuth → resolvePractice
+  → resolveLocation (scoped routes) → can(action) → validate(schema)
+  → handler → errorHandler
 ```
 
-The error handling middleware sends an error response, which has the following format:
+The first three are mounted app-wide. The rest are declared on each route, so
+reading a route file tells you who may call it and with what.
+
+## Responses
+
+Success:
+
+```json
+{ "data": {}, "meta": { "page": 1, "limit": 20, "total": 42, "totalPages": 3 } }
+```
+
+Failure:
 
 ```json
 {
-  "code": 404,
-  "message": "Not found"
-}
-```
-
-When running in development mode, the error response also contains the error stack.
-
-The app has a utility ApiError class to which you can attach a response code and a message, and then throw it from anywhere (catchAsync will catch it).
-
-For example, if you are trying to get a user from the DB who is not found, and you want to send a 404 error, the code should look something like:
-
-```javascript
-const httpStatus = require('http-status');
-const ApiError = require('../utils/ApiError');
-const User = require('../models/User');
-
-const getUser = async (userId) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+  "error": {
+    "code": "RX_LOCKED",
+    "message": "This prescription is approved. Revise it to make a new version.",
+    "details": null
   }
-};
-```
-
-## Validation
-
-Request data is validated using [Joi](https://joi.dev/). Check the [documentation](https://joi.dev/api/) for more details on how to write Joi validation schemas.
-
-The validation schemas are defined in the `src/validations` directory and are used in the routes by providing them as parameters to the `validate` middleware.
-
-```javascript
-const express = require('express');
-const validate = require('../../middlewares/validate');
-const userValidation = require('../../validations/user.validation');
-const userController = require('../../controllers/user.controller');
-
-const router = express.Router();
-
-router.post('/users', validate(userValidation.createUser), userController.createUser);
-```
-
-## Authentication
-
-To require authentication for certain routes, you can use the `auth` middleware.
-
-```javascript
-const express = require('express');
-const auth = require('../../middlewares/auth');
-const userController = require('../../controllers/user.controller');
-
-const router = express.Router();
-
-router.post('/users', auth(), userController.createUser);
-```
-
-These routes require a valid JWT access token in the Authorization request header using the Bearer schema. If the request does not contain a valid access token, an Unauthorized (401) error is thrown.
-
-**Generating Access Tokens**:
-
-An access token can be generated by making a successful call to the register (`POST /v1/auth/register`) or login (`POST /v1/auth/login`) endpoints. The response of these endpoints also contains refresh tokens (explained below).
-
-An access token is valid for 30 minutes. You can modify this expiration time by changing the `JWT_ACCESS_EXPIRATION_MINUTES` environment variable in the .env file.
-
-**Refreshing Access Tokens**:
-
-After the access token expires, a new access token can be generated, by making a call to the refresh token endpoint (`POST /v1/auth/refresh-tokens`) and sending along a valid refresh token in the request body. This call returns a new access token and a new refresh token.
-
-A refresh token is valid for 30 days. You can modify this expiration time by changing the `JWT_REFRESH_EXPIRATION_DAYS` environment variable in the .env file.
-
-## Authorization
-
-The `auth` middleware can also be used to require certain rights/permissions to access a route.
-
-```javascript
-const express = require('express');
-const auth = require('../../middlewares/auth');
-const userController = require('../../controllers/user.controller');
-
-const router = express.Router();
-
-router.post('/users', auth('manageUsers'), userController.createUser);
-```
-
-In the example above, an authenticated user can access this route only if that user has the `manageUsers` permission.
-
-The permissions are role-based. You can view the permissions/rights of each role in the `src/config/roles.js` file.
-
-If the user making the request does not have the required permissions to access this route, a Forbidden (403) error is thrown.
-
-## Logging
-
-Import the logger from `src/config/logger.js`. It is using the [Winston](https://github.com/winstonjs/winston) logging library.
-
-Logging should be done according to the following severity levels (ascending order from most important to least important):
-
-```javascript
-const logger = require('<path to src>/config/logger');
-
-logger.error('message'); // level 0
-logger.warn('message'); // level 1
-logger.info('message'); // level 2
-logger.http('message'); // level 3
-logger.verbose('message'); // level 4
-logger.debug('message'); // level 5
-```
-
-In development mode, log messages of all severity levels will be printed to the console.
-
-In production mode, only `info`, `warn`, and `error` logs will be printed to the console.\
-It is up to the server (or process manager) to actually read them from the console and store them in log files.\
-This app uses pm2 in production mode, which is already configured to store the logs in log files.
-
-Note: API request information (request url, response code, timestamp, etc.) are also automatically logged (using [morgan](https://github.com/expressjs/morgan)).
-
-## Custom Mongoose Plugins
-
-The app also contains 2 custom mongoose plugins that you can attach to any mongoose model schema. You can find the plugins in `src/models/plugins`.
-
-```javascript
-const mongoose = require('mongoose');
-const { toJSON, paginate } = require('./plugins');
-
-const userSchema = mongoose.Schema(
-  {
-    /* schema definition here */
-  },
-  { timestamps: true }
-);
-
-userSchema.plugin(toJSON);
-userSchema.plugin(paginate);
-
-const User = mongoose.model('User', userSchema);
-```
-
-### toJSON
-
-The toJSON plugin applies the following changes in the toJSON transform call:
-
-- removes \_\_v, createdAt, updatedAt, and any schema path that has private: true
-- replaces \_id with id
-
-### paginate
-
-The paginate plugin adds the `paginate` static method to the mongoose schema.
-
-Adding this plugin to the `User` model schema will allow you to do the following:
-
-```javascript
-const queryUsers = async (filter, options) => {
-  const users = await User.paginate(filter, options);
-  return users;
-};
-```
-
-The `filter` param is a regular mongo filter.
-
-The `options` param can have the following (optional) fields:
-
-```javascript
-const options = {
-  sortBy: 'name:desc', // sort order
-  limit: 5, // maximum results per page
-  page: 2, // page number
-};
-```
-
-The plugin also supports sorting by multiple criteria (separated by a comma): `sortBy: name:desc,role:asc`
-
-The `paginate` method returns a Promise, which fulfills with an object having the following properties:
-
-```json
-{
-  "results": [],
-  "page": 2,
-  "limit": 5,
-  "totalPages": 10,
-  "totalResults": 48
 }
 ```
 
-## Linting
+`code` is one of the values in [src/shared/errorCodes.ts](src/shared/errorCodes.ts)
+and it is the contract: the app switches on the code, never on the message or the
+HTTP status. Each code has exactly one status, mapped in that same file, so a new
+code cannot be added without deciding what it answers with. `details` carries a
+field-by-field list on a validation failure.
 
-Linting is done using [ESLint](https://eslint.org/) and [Prettier](https://prettier.io).
+Every response carries `X-Request-Id`, echoing an inbound one if it looks sane, so
+a report from the app can be traced to the request that caused it.
 
-In this app, ESLint is configured to follow the [Airbnb JavaScript style guide](https://github.com/airbnb/javascript/tree/master/packages/eslint-config-airbnb-base) with some modifications. It also extends [eslint-config-prettier](https://github.com/prettier/eslint-config-prettier) to turn off all rules that are unnecessary or might conflict with Prettier.
+## Routes
 
-To modify the ESLint configuration, update the `.eslintrc.json` file. To modify the Prettier configuration, update the `.prettierrc.json` file.
+Base path `/api/v1`. Everything except `/auth` needs `X-Practice-Id`; `/me` is the
+exception that proves the rule, since its answer is what tells the app which
+practice ids exist. Visits, prescriptions and voice also need `X-Location-Id`.
 
-To prevent a certain file or directory from being linted, add it to `.eslintignore` and `.prettierignore`.
+| Module        | Routes                                                                                                                                                     | Who                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| auth          | `POST /auth/otp/send`, `/auth/otp/verify`, `/auth/refresh`, `/auth/logout`                                                                                 | anyone                  |
+| me            | `GET /me`, `PATCH /me`                                                                                                                                     | signed in               |
+| practice      | `GET /practice`, `PATCH /practice`                                                                                                                         | doctor                  |
+| locations     | `GET`/`POST /locations`, `PATCH /locations/:id`, `POST /locations/:id/archive`                                                                             | doctor                  |
+| team          | `GET`/`POST /members`, `PATCH /members/:id`, `DELETE /members/:id`                                                                                         | doctor                  |
+| patients      | `GET /patients?q=`, `POST /patients`, `GET`/`PATCH /patients/:id`                                                                                          | doctor, PA              |
+| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`                                                                                              | doctor, PA              |
+| prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/pdf` | doctor (PA: read + pdf) |
+| voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                | doctor                  |
+| drugs         | `GET /drugs?q=`                                                                                                                                            | doctor                  |
 
-To maintain a consistent coding style across different IDEs, the project contains `.editorconfig`
+Mounted and answering **501**, so the app can link to them and nothing is renamed
+when they go live: `/notifications`, `/devices`, `/templates`,
+`/patients/:id/history`, `/patients/:id/reports`, `/reports/:id`,
+`/appointments`, `/portal/*`, `/prescriptions/from-template/:id`.
 
-## Contributing
+In development, `GET /api/v1/docs` serves the OpenAPI document.
 
-Contributions are more than welcome! Please check out the [contributing guide](CONTRIBUTING.md).
+## Permissions
 
-## Inspirations
+| Action                                            | Doctor                       | PA                 |
+| ------------------------------------------------- | ---------------------------- | ------------------ |
+| add / edit patient                                | yes                          | yes                |
+| search patients                                   | yes                          | yes                |
+| see today's list                                  | any location of his practice | her locations only |
+| create / edit / approve prescription              | yes                          | **no**             |
+| view / print approved prescription                | yes                          | her locations only |
+| voice dictation                                   | yes                          | **no**             |
+| add / remove PA, assign locations                 | yes                          | no                 |
+| add / edit / archive locations, practice settings | yes                          | no                 |
 
-- [danielfsousa/express-rest-es2017-boilerplate](https://github.com/danielfsousa/express-rest-es2017-boilerplate)
-- [madhums/node-express-mongoose](https://github.com/madhums/node-express-mongoose)
-- [kunalkapadia/express-mongoose-es6-rest-api](https://github.com/kunalkapadia/express-mongoose-es6-rest-api)
+The table lives in [src/core/permissions/index.ts](src/core/permissions/index.ts).
+Location scope is not in it, because it is not a question of role: `resolveLocation`
+holds a PA to the locations she was assigned and lets a doctor name any location of
+his own practice.
 
-## License
+## Auth
 
-[MIT](LICENSE)
+Phone and a one-time code. There is no password anywhere in this product.
+
+- `POST /auth/otp/send` issues a six digit code from a CSPRNG, stores it
+  bcrypt-hashed, and texts it. Any code still outstanding for that number is
+  deleted first, so only the most recent one verifies — which is what makes
+  "resend" safe. Outside production the code comes back as `devCode`.
+- `POST /auth/otp/verify` consumes it. A wrong guess is counted; too many burn the
+  code. The code is single use.
+- A phone number that verifies is a person, so there is no separate sign-up. A
+  user with **no memberships at all** gets a practice, one location called "My
+  clinic", and a doctor membership. A PA already has a membership before she first
+  signs in — the doctor made it when he typed her number — so she lands in his
+  clinic rather than getting one of her own.
+- Refresh tokens are stored as a SHA-256 and consuming one deletes it, so a replay
+  fails. Every token carries a `jti`, because `iat` has one-second resolution and
+  two tokens signed in the same second would otherwise be identical.
+- Membership is read on **every** request rather than carried in the token, so
+  removing a PA ends her access now, not when her token expires.
+
+## Prescriptions
+
+A draft is edited only through **ops**:
+
+```json
+{
+  "ops": [
+    {
+      "op": "add",
+      "section": "medicines",
+      "value": {
+        "name": "Panadol",
+        "strength": "500mg",
+        "pattern": { "m": 1, "a": 0, "n": 1 },
+        "timing": "after_meal",
+        "durationDays": 5
+      }
+    },
+    { "op": "update", "section": "followUp", "value": { "inDays": 7 } }
+  ]
+}
+```
+
+`op` is `add`, `update` or `remove`; `section` is one of the nine list sections or
+`followUp`, which only updates. An `add` never carries an id — the server mints one.
+An `update` or `remove` addresses an existing `itemId`.
+
+The whole batch is validated before any of it is applied
+([prescriptionOps.service.ts](src/services/prescriptionOps.service.ts)). Two
+reasons: a bad op halfway through would otherwise leave a prescription half
+edited, and this is the gate rule 6 rests on. An op that names a section that does
+not take it, invents a field, or addresses an item that is not there comes back as
+`OP_INVALID`.
+
+**Approval** mints the number with one atomic `$inc` on the practice counter —
+never read-then-write, which is how two prescriptions end up with the same number
+on a legal document — freezes the letterhead, and locks the document. **Revising**
+creates version 2 and marks version 1 `superseded`, so what the patient was handed
+stays exactly as it was printed.
+
+The print file is rendered on first ask rather than at approval, so an approval
+never waits on a renderer. With `PDF_RENDERER_URL` set, the HTML is posted there
+and the PDF stored; without one, the HTML is stored and `meta.format` says so.
+
+`editLog` records every typed correction and `correctedBySpeech` marks every
+dictated one. Together they are how the accuracy of the voice pipeline gets
+measured over real use.
+
+## Voice
+
+One segment of audio at a time, base64 inside the JSON body, with `seq` strictly
+one more than the last: an upload that skips ahead is refused rather than quietly
+reordered, because the ops of segment 3 can refer to a line segment 2 was about to
+add. Transcription runs in process and the app polls
+`GET /prescriptions/:id/voice`.
+
+```
+audio → transcript + spans → ops → server validates → server applies
+```
+
+Every line on the page keeps the `sourceSpanIds` it came from, so it can always be
+traced back to what was said.
+
+**The transcriber and the ops extractor are seams, and default to `none`**, which
+fails a segment with a clear error. Choosing them is a decision about accuracy on
+Pakistani code-switched speech and about where patient audio is allowed to go, and
+it is not made here; what is settled is the contract on either side. Implement
+[stt.service.ts](src/services/stt.service.ts) and
+[llm.service.ts](src/services/llm.service.ts) and nothing else changes. The `mock`
+drivers read the upload as UTF-8 text and accept a JSON array of ops, which is how
+the ordering, validation, apply and audit path is tested end to end.
+
+Two things keep the queue from wedging: a timeout that fails a segment so the ones
+behind it move, and a sweep that does the same for a segment whose processing began
+before the process restarted. Dictation audio is deleted once the practice's
+retention has run out — the transcript stays, the recording of a patient's voice
+does not.
+
+## Conventions
+
+- **Ids** are Mongo ObjectIds. Human-readable numbers only where they are printed.
+- **Time** is stored in UTC and shown in `Asia/Karachi`. Pakistan is UTC+05:00 all
+  year and has not observed daylight saving since 2009, so
+  [utils/time.ts](src/utils/time.ts) uses a fixed offset rather than a timezone
+  database. A visit's `date` is the Karachi calendar day as `YYYY-MM-DD`: a day on
+  a waiting list has no time of day.
+- **Phones** are E.164 (`+923001234567`), unique on users.
+- **Every document** carries `practiceId`, `createdAt`, `updatedAt`, `createdBy`.
+  Compound indexes start at `practiceId` and continue with `locationId` where a
+  record belongs to a place.
+- **Location scope**: visits, prescriptions and voice. Patient search and history
+  are practice-wide **on purpose**.
+- **Bilingual** fields that print in Urdu hold `{ en, ur }`.
+- **Feature flags** live on `practice.features`.
+- **Naming**: collections plural camelCase, events `entity.pastTense`, permissions
+  `entity.verb`.
+- **Private files**: audio and PDFs in private object storage only, served by short
+  signed URLs. No patient names in logs or in object keys. The application log
+  carries ids and masked phone numbers; the before/after of a record belongs in the
+  audit log.
+
+## Events
+
+`patient.added`, `visit.statusChanged`, `voice.segmentApplied`,
+`voice.segmentFailed`, `prescription.approved`, `prescription.revised`,
+`member.added`, `member.removed`, `member.locationsChanged`, `location.added`,
+`location.archived`, `report.uploaded`.
+
+Services emit; [src/listeners](src/listeners) decides what they cause. No service
+calls notification or SMS code directly, so adding push later means adding a
+handler and editing no prescription code.
+
+## Deliberately not built yet
+
+- **No queue and no SSE.** Transcription, extraction and PDF rendering run in
+  process and the app polls. Both are worth adding when load asks for them, and
+  the housekeeping sweeps in [src/index.ts](src/index.ts) are plain timers for the
+  same reason.
+- **No formulary import.** `drugs` starts empty and grows from use: a medicine
+  nobody has prescribed before is inserted, and the next time it matches. A
+  doctor's working repertoire is 200-400 drugs, so a text index with a prefix
+  fallback is plenty and Atlas Search is not needed.
+- **No notification UI.** The rows are being written from day one, so turning the
+  inbox on later is a screen rather than a backfill.
+
+## Testing
+
+```bash
+yarn test
+```
+
+Hermetic: each test file starts its own in-memory mongod and builds the real
+indexes, so the unique and text indexes the code relies on are actually exercised.
+No local mongod, no CI service container.
+
+The suites that exist to hold the six rules down:
+
+| File                                                                                       | What it proves                                                                                                                                               |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to her own locations; removing her ends her session now                                  |
+| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number |
+| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript             |
+| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                     |
+| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                           |
+| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                  |

@@ -17,3 +17,8 @@ process.env.OTP_RATE_LIMIT_MAX = process.env.OTP_RATE_LIMIT_MAX ?? '100000';
 
 process.env.STORAGE_DRIVER = process.env.STORAGE_DRIVER ?? 'local';
 process.env.STORAGE_LOCAL_DIR = process.env.STORAGE_LOCAL_DIR ?? '.storage/test';
+
+// The deterministic drivers, so the dictation path - ordering, validation,
+// apply, audit - is exercised end to end without a real provider.
+process.env.STT_PROVIDER = process.env.STT_PROVIDER ?? 'mock';
+process.env.LLM_PROVIDER = process.env.LLM_PROVIDER ?? 'mock';

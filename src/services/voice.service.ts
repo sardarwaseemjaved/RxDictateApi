@@ -16,8 +16,7 @@ import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
 import { audioKey, extensionFor, get as getObject, put, remove, signedGetUrl } from '../core/storage';
 import type { AddSegmentBody, SegmentView, SignedUrlView, VoiceSessionView } from '../shared/voice.schema';
-import type { PrescriptionSections } from '../shared/prescription.schema';
-import { applyOps } from './prescriptionOps.service';
+import { applyOps, wireSections } from './prescriptionOps.service';
 import { extractOps } from './llm.service';
 import { transcribe } from './stt.service';
 
@@ -148,13 +147,13 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   const extraction = await extractOps({
     transcript: transcription.transcript,
     spans: transcription.spans,
-    sections: prescription.sections as PrescriptionSections,
+    sections: wireSections(prescription.sections),
   });
   segment.ops = extraction.ops;
   segment.llmModel = extraction.model;
   segment.costUsd = (segment.costUsd ?? 0) + (extraction.costUsd ?? 0);
 
-  const { sections } = applyOps(prescription.sections as PrescriptionSections, extraction.ops, {
+  const { sections } = applyOps(wireSections(prescription.sections), extraction.ops, {
     actorId: session.doctorId,
     origin: 'voice',
   });

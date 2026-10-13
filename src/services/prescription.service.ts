@@ -20,13 +20,12 @@ import type {
   LetterheadSnapshot,
   ListPrescriptionsQuery,
   PatchPrescriptionBody,
-  PrescriptionSections,
   RevisePrescriptionBody,
 } from '../shared/prescription.schema';
 import { prescriptionSectionsSchema } from '../shared/prescription.schema';
 import type { PageMeta, SignedUrlView } from '../shared';
 import { addDays, ageFromDob } from '../utils/time';
-import { applyOps, isEmpty } from './prescriptionOps.service';
+import { applyOps, isEmpty, wireSections } from './prescriptionOps.service';
 import { nextPrescriptionNumber } from './counter.service';
 import { findOrCreateDrug } from './drug.service';
 import { renderPrescription } from './pdf.service';
@@ -132,9 +131,7 @@ export const createPrescription = async (scope: Scope, body: CreatePrescriptionB
  * formulary from real use instead of from an import.
  */
 const resolveMedicineDrugs = async (prescription: PrescriptionDoc, actorId: Types.ObjectId): Promise<void> => {
-  // Parsed rather than read straight off the document, so these are plain
-  // objects to rebuild rather than a mongoose subtree to mutate.
-  const sections = prescriptionSectionsSchema.parse(prescription.sections) as PrescriptionSections;
+  const sections = wireSections(prescription.sections);
   if (sections.medicines.every((medicine) => medicine.drugId)) {
     return;
   }
@@ -171,7 +168,7 @@ export const patchPrescription = async (scope: Scope, id: string, body: PatchPre
   const before = { sections: prescription.sections, printLanguage: prescription.printLanguage };
 
   if (body.ops.length > 0) {
-    const { sections, editLog } = applyOps(prescription.sections as PrescriptionSections, body.ops, {
+    const { sections, editLog } = applyOps(wireSections(prescription.sections), body.ops, {
       actorId: scope.actorId,
       origin: 'typed',
     });
@@ -230,7 +227,7 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
   const prescription = await getPrescriptionDoc(scope, id);
   assertDraft(prescription);
 
-  if (isEmpty(prescription.sections as PrescriptionSections)) {
+  if (isEmpty(wireSections(prescription.sections))) {
     throw new AppError('VALIDATION_ERROR', 'There is nothing on this prescription to approve.');
   }
 
@@ -297,7 +294,7 @@ export const revisePrescription = async (scope: Scope, id: string, body: ReviseP
     status: 'draft',
     source: previous.source,
     printLanguage: previous.printLanguage,
-    sections: prescriptionSectionsSchema.parse(previous.sections),
+    sections: wireSections(previous.sections),
     version: previous.version + 1,
     previousVersionId: previous._id,
     number: null,

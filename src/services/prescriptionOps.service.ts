@@ -30,6 +30,18 @@ interface Normalized {
   before: unknown;
 }
 
+/**
+ * The sections as src/shared describes them: plain JSON, with ObjectIds as
+ * strings.
+ *
+ * A mongoose subtree holds real ObjectId instances and subdocuments, and the
+ * contract knows nothing about either - it describes what goes over the wire.
+ * Everything that validates, applies or prints sections comes through here
+ * first, which also fills in any section a stored document predates.
+ */
+export const wireSections = (sections: unknown): PrescriptionSections =>
+  prescriptionSectionsSchema.parse(JSON.parse(JSON.stringify(sections))) as PrescriptionSections;
+
 const isListSection = (section: Section): section is ListSection => (LIST_SECTIONS as readonly string[]).includes(section);
 
 const invalid = (index: number, op: Op, message: string, details?: unknown): AppError =>
@@ -143,11 +155,9 @@ export const applyOps = (
   ops: Op[],
   context: { actorId: Types.ObjectId; origin: OpOrigin; at?: Date },
 ): ApplyOpsResult => {
-  const normalized = validateOps(current, ops);
-
-  // Normalising through the schema fills in any section a document predates and
-  // gives us a plain object to mutate rather than a mongoose subtree.
-  const sections = prescriptionSectionsSchema.parse(current) as PrescriptionSections;
+  // A copy to mutate, so a caller's sections are never changed underneath it.
+  const sections = wireSections(current);
+  const normalized = validateOps(sections, ops);
   const editLog: EditLogEntry[] = [];
   const at = context.at ?? new Date();
   const by = String(context.actorId);
@@ -215,4 +225,4 @@ export const isEmpty = (sections: PrescriptionSections): boolean => {
   return !anyList && !anyFollowUp;
 };
 
-export default { validateOps, applyOps, isEmpty };
+export default { validateOps, applyOps, isEmpty, wireSections };

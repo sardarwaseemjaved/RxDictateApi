@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import config from '../config/config';
 import { RefreshToken, type RefreshTokenDoc, type UserDoc } from '../models';
@@ -11,6 +11,13 @@ type TokenType = 'access' | 'refresh';
 interface Claims {
   sub: string;
   type: TokenType;
+  /**
+   * A nonce, because `iat` has one-second resolution: without it two tokens
+   * signed for the same user in the same second are byte-identical, and a
+   * refresh token that is supposed to be single use would be reissued
+   * unchanged.
+   */
+  jti: string;
 }
 
 /**
@@ -21,7 +28,7 @@ interface Claims {
 const hash = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 const sign = (userId: string, type: TokenType, expires: Date): string =>
-  jwt.sign({ sub: userId, type } satisfies Claims, config.jwt.secret, {
+  jwt.sign({ sub: userId, type, jti: randomUUID() } satisfies Claims, config.jwt.secret, {
     expiresIn: Math.floor((expires.getTime() - Date.now()) / 1000),
   });
 

@@ -4,6 +4,7 @@ import { prescriptionPdfKey, put } from '../core/storage';
 import type { PrescriptionDoc } from '../models';
 import type { LetterheadSnapshot, MedicineItem, PrescriptionSections, TextItem } from '../shared/prescription.schema';
 import { LIST_SECTIONS } from '../shared/prescription.schema';
+import { wireSections } from './prescriptionOps.service';
 
 const escape = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -131,7 +132,7 @@ export const prescriptionHtml = (prescription: PrescriptionDoc, patientName: str
     qualifications: [],
     pmdcNo: '',
   };
-  const sections = prescription.sections as PrescriptionSections;
+  const sections = wireSections(prescription.sections);
 
   return `<!doctype html>
 <html lang="${bilingual ? 'en' : 'en'}">

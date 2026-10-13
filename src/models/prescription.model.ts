@@ -162,9 +162,20 @@ prescriptionSchema.plugin(toJSON);
 prescriptionSchema.plugin(paginate);
 
 prescriptionSchema.index({ practiceId: 1, patientId: 1, createdAt: -1 });
-// Sparse because a draft has no number yet, and unique because a number is
-// what a patient and a pharmacist quote back.
-prescriptionSchema.index({ practiceId: 1, number: 1 }, { unique: true, sparse: true });
+/**
+ * Unique, because a prescription number is what a patient and a pharmacist
+ * quote back about a legal document.
+ *
+ * A partial filter and not `sparse`: on a compound index, sparse only skips a
+ * document that is missing every indexed field, so with practiceId present two
+ * drafts - both with number null - would collide on the null. Restricting the
+ * index to documents whose number is a string leaves drafts out of it
+ * altogether, which is what lets a practice hold more than one at a time.
+ */
+prescriptionSchema.index(
+  { practiceId: 1, number: 1 },
+  { unique: true, partialFilterExpression: { number: { $type: 'string' } } },
+);
 prescriptionSchema.index({ practiceId: 1, locationId: 1, status: 1, createdAt: -1 });
 
 export const Prescription = mongoose.model<IPrescription, PaginateModel<IPrescription>>(
