@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { syncCollections } from '../../src/models';
+import { removeAllListeners } from '../../src/core/events';
 
 /**
  * An in-memory mongod per test file.
@@ -23,6 +24,7 @@ const setupTestDB = (): void => {
   });
 
   afterAll(async () => {
+    removeAllListeners();
     await mongoose.disconnect();
     await mongod.stop();
   });

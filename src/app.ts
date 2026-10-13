@@ -11,6 +11,8 @@ import { generalLimiter } from './middlewares/rateLimiter';
 import routes from './routes/v1';
 import { errorConverter, errorHandler } from './middlewares/error';
 import { AppError } from './core/errors';
+// Registers the event handlers. Imported for the side effect, on purpose.
+import './listeners';
 
 const app = express();
 

@@ -5,11 +5,17 @@ import { toJSON } from './plugins';
  * Refresh tokens are kept server side so a sign-out can actually revoke one and
  * so a stolen token can be burned. Access tokens stay stateless.
  *
+ * Only a SHA-256 of the token is stored. A refresh token is a bearer
+ * credential: held in plaintext, a dump of this collection would be a set of
+ * working sign-ins. The hash is unsalted on purpose, because a lookup has to
+ * find a row from the token alone, and the token is 200 bits of signed random
+ * rather than a guessable secret.
+ *
  * Infrastructure rather than a clinical record, which is why there is no
  * practiceId here: a token belongs to a person, not to a practice.
  */
 export interface IRefreshToken {
-  token: string;
+  tokenHash: string;
   userId: Types.ObjectId;
   expires: Date;
   blacklisted: boolean;
@@ -21,7 +27,7 @@ export type RefreshTokenDoc = HydratedDocument<IRefreshToken>;
 
 const refreshTokenSchema = new Schema<IRefreshToken>(
   {
-    token: { type: String, required: true, private: true },
+    tokenHash: { type: String, required: true, private: true },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     expires: { type: Date, required: true },
     blacklisted: { type: Boolean, default: false },
@@ -31,7 +37,7 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
 
 refreshTokenSchema.plugin(toJSON);
 
-refreshTokenSchema.index({ token: 1 });
+refreshTokenSchema.index({ tokenHash: 1 }, { unique: true });
 refreshTokenSchema.index({ userId: 1 });
 // An expired refresh token is of no use to anyone, so Mongo clears it out.
 refreshTokenSchema.index({ expires: 1 }, { expireAfterSeconds: 0 });
