@@ -1,32 +1,33 @@
 version: '3'
 
 services:
-  node-app:
+  clinic-api:
     build: .
-    image: node-app
+    image: clinic-api
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017/node-boilerplate
+      - MONGODB_URL=mongodb://mongodb:27017/clinic-api
     ports:
       - '3000:3000'
     depends_on:
       - mongodb
     volumes:
-      - .:/usr/src/node-app
+      - .:/usr/src/clinic-api
     networks:
-      - node-network
+      - clinic-network
 
   mongodb:
-    image: mongo:4.2.1-bionic
+    # 4.2 predates the $elemMatch and text-index behaviour this API relies on.
+    image: mongo:7.0
     ports:
       - '27017:27017'
     volumes:
       - dbdata:/data/db
     networks:
-      - node-network
+      - clinic-network
 
 volumes:
   dbdata:
 
 networks:
-  node-network:
+  clinic-network:
     driver: bridge

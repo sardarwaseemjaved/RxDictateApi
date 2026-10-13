@@ -1,6 +1,6 @@
 version: '3'
 
 services:
-  node-app:
-    container_name: node-app-dev
-    command: yarn dev -L
+  clinic-api:
+    container_name: clinic-api-dev
+    command: yarn dev

@@ -4,8 +4,36 @@ import app from './app';
 import config from './config/config';
 import logger from './config/logger';
 import { syncCollections } from './models';
+import { sweepExpiredAudio, sweepStalledSegments } from './services/voice.service';
 
 let server: Server | undefined;
+
+/**
+ * Two housekeeping jobs, on plain timers.
+ *
+ * There is no queue in this product yet and these do not need one: both are
+ * idempotent, both are cheap, and both would otherwise need a scheduler to be
+ * stood up before the first doctor can use the app. The timers are unref'd so
+ * they never hold the process open.
+ *
+ * - Dictation audio is deleted once practice.settings.audioRetentionDays have
+ *   passed since approval. The transcript stays; the recording of a patient's
+ *   voice does not.
+ * - A segment whose processing began and never finished - because this process
+ *   restarted mid-transcription - is marked failed, so the segments queued
+ *   behind it are not stuck forever.
+ */
+const startSweeps = (): void => {
+  const run = (what: string, job: () => Promise<number>) => {
+    job().catch((error: Error) => logger.error(`${what} sweep failed: ${error.message}`));
+  };
+
+  run('stalled segment', sweepStalledSegments);
+  run('audio retention', sweepExpiredAudio);
+
+  setInterval(() => run('stalled segment', sweepStalledSegments), 5 * 60 * 1000).unref();
+  setInterval(() => run('audio retention', sweepExpiredAudio), 6 * 60 * 60 * 1000).unref();
+};
 
 const start = async (): Promise<void> => {
   await mongoose.connect(config.mongoose.url);
@@ -18,6 +46,8 @@ const start = async (): Promise<void> => {
   server = app.listen(config.port, () => {
     logger.info(`Listening to port ${config.port}`);
   });
+
+  startSweeps();
 };
 
 const exitHandler = () => {

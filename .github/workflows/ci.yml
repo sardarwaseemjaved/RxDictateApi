@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      # The suite runs against an in-memory mongod, so there is no service
+      # container here. These are only what src/config/config.ts insists on.
+      MONGODB_URL: mongodb://127.0.0.1:27017/clinic-api
+      JWT_SECRET: a-ci-secret-that-is-long-enough
+      CORS_ORIGINS: http://localhost:8081
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      - run: yarn lint
+
+      - run: yarn typecheck
+
+      - run: yarn test

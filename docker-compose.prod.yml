@@ -1,6 +1,6 @@
 version: '3'
 
 services:
-  node-app:
-    container_name: node-app-prod
+  clinic-api:
+    container_name: clinic-api-prod
     command: yarn start

@@ -17,6 +17,8 @@ import { AppError } from '../errors';
 export interface StorageDriver {
   readonly name: string;
   put(key: string, body: Buffer, contentType: string): Promise<void>;
+  /** Read the bytes back. Needed to retry a transcription without re-uploading. */
+  get(key: string): Promise<Buffer>;
   signedGetUrl(key: string, expiresInSeconds: number): Promise<string>;
   remove(key: string): Promise<void>;
 }
@@ -78,6 +80,13 @@ const s3Driver = (): StorageDriver => {
     async put(key, body, contentType) {
       await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
     },
+    async get(key) {
+      const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      if (!object.Body) {
+        throw new AppError('NOT_FOUND', 'that file is no longer stored');
+      }
+      return Buffer.from(await object.Body.transformToByteArray());
+    },
     async signedGetUrl(key, expiresInSeconds) {
       return presign(client, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: expiresInSeconds });
     },
@@ -117,6 +126,10 @@ const localDriver = (): StorageDriver => {
       await fs.writeFile(target, body);
       /* eslint-enable security/detect-non-literal-fs-filename */
     },
+    async get(key) {
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      return fs.readFile(resolveKey(key));
+    },
     async signedGetUrl(key) {
       return `file://${resolveKey(key)}`;
     },
@@ -139,6 +152,8 @@ export const driver = (): StorageDriver => {
 export const put = async (key: string, body: Buffer, contentType: string): Promise<void> =>
   driver().put(key, body, contentType);
 
+export const get = async (key: string): Promise<Buffer> => driver().get(key);
+
 export const signedGetUrl = async (
   key: string,
   expiresInSeconds: number = config.storage.signedUrlTtlSeconds,
@@ -156,4 +171,4 @@ export const remove = async (key: string): Promise<void> => {
   }
 };
 
-export default { driver, put, signedGetUrl, remove, audioKey, prescriptionPdfKey, reportKey, extensionFor };
+export default { driver, put, get, signedGetUrl, remove, audioKey, prescriptionPdfKey, reportKey, extensionFor };

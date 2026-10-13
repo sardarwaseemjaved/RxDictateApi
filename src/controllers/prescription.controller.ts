@@ -1,0 +1,52 @@
+import { scopeFrom } from '../core/tenancy';
+import * as prescriptionService from '../services/prescription.service';
+import catchAsync from '../utils/catchAsync';
+import { parsedQuery } from '../utils/request';
+import { sendCreated, sendData } from '../utils/response';
+import type {
+  CreatePrescriptionBody,
+  ListPrescriptionsQuery,
+  PatchPrescriptionBody,
+  RevisePrescriptionBody,
+} from '../shared/prescription.schema';
+
+export const listPrescriptions = catchAsync(async (req, res) => {
+  const { prescriptions, meta } = await prescriptionService.listPrescriptions(
+    scopeFrom(req),
+    parsedQuery<ListPrescriptionsQuery>(req),
+  );
+  sendData(res, prescriptions, meta);
+});
+
+export const getPrescription = catchAsync(async (req, res) => {
+  sendData(res, await prescriptionService.getPrescription(scopeFrom(req), req.params.id));
+});
+
+export const createPrescription = catchAsync(async (req, res) => {
+  sendCreated(res, await prescriptionService.createPrescription(scopeFrom(req), req.body as CreatePrescriptionBody));
+});
+
+export const patchPrescription = catchAsync(async (req, res) => {
+  sendData(
+    res,
+    await prescriptionService.patchPrescription(scopeFrom(req), req.params.id, req.body as PatchPrescriptionBody),
+  );
+});
+
+export const approvePrescription = catchAsync(async (req, res) => {
+  // The doctor's name is frozen onto the page, so it comes from the signed-in
+  // user rather than from anything the client sent.
+  sendData(res, await prescriptionService.approvePrescription(scopeFrom(req), req.params.id, req.auth!.name));
+});
+
+export const revisePrescription = catchAsync(async (req, res) => {
+  sendCreated(
+    res,
+    await prescriptionService.revisePrescription(scopeFrom(req), req.params.id, req.body as RevisePrescriptionBody),
+  );
+});
+
+export const prescriptionPdf = catchAsync(async (req, res) => {
+  const { url, expiresAt, driver } = await prescriptionService.prescriptionPdf(scopeFrom(req), req.params.id);
+  sendData(res, { url, expiresAt }, { format: driver });
+});

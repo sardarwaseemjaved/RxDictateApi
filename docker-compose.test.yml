@@ -1,6 +1,6 @@
 version: '3'
 
 services:
-  node-app:
-    container_name: node-app-test
+  clinic-api:
+    container_name: clinic-api-test
     command: yarn test
