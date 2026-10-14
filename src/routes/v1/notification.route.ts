@@ -1,17 +1,16 @@
 import express from 'express';
+import { notificationController } from '../../controllers';
+import { notificationValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
-import notImplemented from '../../middlewares/notImplemented';
-import { notificationValidation } from '../../validations';
 import { resolvePractice } from '../../core/tenancy';
 import { requireCan } from '../../core/permissions';
 
 const router = express.Router();
 
 /**
- * Notifications are already being written by the event listeners; there is just
- * no inbox yet. These answer 501 behind the real auth and permission chain, so
- * the day the screen ships nothing about the contract changes.
+ * This person's inbox in this clinic. The rows have been written since the
+ * first commit by the event listeners, so there was nothing to backfill.
  */
 router.get(
   '/',
@@ -19,7 +18,7 @@ router.get(
   resolvePractice,
   requireCan('notification.read'),
   validate(notificationValidation.listNotifications),
-  notImplemented('The notification inbox'),
+  notificationController.listNotifications,
 );
 
 router.post(
@@ -28,7 +27,7 @@ router.post(
   resolvePractice,
   requireCan('notification.read'),
   validate(notificationValidation.markRead),
-  notImplemented('Marking notifications read'),
+  notificationController.markRead,
 );
 
 export default router;

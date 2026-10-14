@@ -75,6 +75,29 @@ export interface EventPayloads {
   };
   'location.added': { practiceId: Types.ObjectId; locationId: Types.ObjectId; actorId: Types.ObjectId };
   'location.archived': { practiceId: Types.ObjectId; locationId: Types.ObjectId; actorId: Types.ObjectId };
+  'vitals.recorded': {
+    practiceId: Types.ObjectId;
+    locationId: Types.ObjectId;
+    visitId: Types.ObjectId;
+    patientId: Types.ObjectId;
+    /** Which readings were out of range, so a listener need not re-derive them. */
+    flaggedFields: string[];
+    actorId: Types.ObjectId;
+  };
+  'appointment.booked': {
+    practiceId: Types.ObjectId;
+    locationId: Types.ObjectId;
+    appointmentId: Types.ObjectId;
+    patientId: Types.ObjectId;
+    at: Date;
+    actorId: Types.ObjectId;
+  };
+  'appointment.cancelled': {
+    practiceId: Types.ObjectId;
+    locationId: Types.ObjectId;
+    appointmentId: Types.ObjectId;
+    actorId: Types.ObjectId;
+  };
   'report.uploaded': {
     practiceId: Types.ObjectId;
     patientId: Types.ObjectId;

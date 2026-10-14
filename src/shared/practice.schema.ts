@@ -23,6 +23,8 @@ export const practiceViewSchema = z.object({
   ownerId: objectIdSchema,
   pmdcNo: z.string(),
   qualifications: z.array(z.string()),
+  /** "Consultant Physician". Printed under the doctor's name on a prescription. */
+  speciality: z.string(),
   features: practiceFeaturesSchema,
   settings: practiceSettingsSchema,
 });
@@ -33,6 +35,7 @@ export const updatePracticeBodySchema = z
     name: z.string().trim().min(1).max(160).optional(),
     pmdcNo: z.string().trim().max(60).optional(),
     qualifications: z.array(z.string().trim().min(1).max(60)).max(20).optional(),
+    speciality: z.string().trim().max(120).optional(),
     features: practiceFeaturesSchema.partial().optional(),
     settings: practiceSettingsSchema.partial().optional(),
   })

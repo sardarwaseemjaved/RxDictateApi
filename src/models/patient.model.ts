@@ -11,12 +11,17 @@ import type { Sex } from '../shared/common';
  */
 export interface IPatient {
   practiceId: Types.ObjectId;
+  /** `MR-10001`. What the patient's file is labelled with, and what they quote. */
+  mrNo: string;
   name: string;
   phone: string;
   /** `YYYY-MM-DD`, or null when only an age is known. */
   dob: string | null;
   age: number | null;
   sex: Sex;
+  allergies: string[];
+  /** Asked and none, as opposed to never asked. An empty list cannot say which. */
+  noKnownAllergies: boolean;
   addedBy: Types.ObjectId;
   createdBy: Types.ObjectId;
   deletedAt: Date | null;
@@ -29,11 +34,14 @@ export type PatientDoc = HydratedDocument<IPatient>;
 const patientSchema = new Schema<IPatient>(
   {
     practiceId: { type: Schema.Types.ObjectId, ref: 'Practice', required: true },
+    mrNo: { type: String, required: true },
     name: { type: String, required: true, trim: true },
     phone: { type: String, default: '', trim: true },
     dob: { type: String, default: null },
     age: { type: Number, default: null },
     sex: { type: String, enum: ['male', 'female', 'other'], required: true },
+    allergies: { type: [String], default: [] },
+    noKnownAllergies: { type: Boolean, default: false },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     deletedAt: { type: Date, default: null },
@@ -45,6 +53,7 @@ patientSchema.plugin(toJSON);
 patientSchema.plugin(paginate);
 
 patientSchema.index({ practiceId: 1, phone: 1 });
+patientSchema.index({ practiceId: 1, mrNo: 1 }, { unique: true });
 // A compound text index: the practiceId prefix has to be matched by equality,
 // which is exactly how every search runs, and keeps one clinic's names out of
 // another's results.

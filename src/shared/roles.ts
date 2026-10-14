@@ -60,6 +60,7 @@ export const ACTIONS = [
 
   'appointment.read',
   'appointment.create',
+  'appointment.cancel',
 
   'notification.read',
 ] as const;

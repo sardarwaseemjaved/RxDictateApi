@@ -12,6 +12,8 @@ export interface IPractice {
   ownerId: Types.ObjectId;
   pmdcNo: string;
   qualifications: string[];
+  /** "Consultant Physician", printed under the doctor's name. */
+  speciality: string;
   features: PracticeFeatures;
   settings: PracticeSettings;
   /**
@@ -19,6 +21,12 @@ export interface IPractice {
    * $inc: a read-then-write here puts a duplicate number on a legal document.
    */
   rxCounter: number;
+  /**
+   * The last MR number handed out. Starts at 10000, so the first patient is
+   * MR-10001 - a five-digit number looks like a record number and a one-digit
+   * one looks like a mistake. Moved only by an atomic $inc, like rxCounter.
+   */
+  mrCounter: number;
   createdBy: Types.ObjectId;
   deletedAt: Date | null;
   createdAt: Date;
@@ -33,6 +41,7 @@ const practiceSchema = new Schema<IPractice>(
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     pmdcNo: { type: String, default: '', trim: true },
     qualifications: { type: [String], default: [] },
+    speciality: { type: String, default: '', trim: true },
     features: {
       voice: { type: Boolean, default: true },
       templates: { type: Boolean, default: false },
@@ -41,6 +50,7 @@ const practiceSchema = new Schema<IPractice>(
       audioRetentionDays: { type: Number, default: 30 },
     },
     rxCounter: { type: Number, default: 0 },
+    mrCounter: { type: Number, default: 10000 },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     deletedAt: { type: Date, default: null },
   },

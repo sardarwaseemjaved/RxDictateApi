@@ -6,8 +6,20 @@ import { emit } from '../core/events';
 import type { CreateVisitBody, ListVisitsQuery, UpdateVisitBody, VisitView } from '../shared/visit.schema';
 import { todayInKarachi } from '../utils/time';
 import { toPatientView } from './patient.service';
+import { nextVisitToken } from './counter.service';
 
 const visits = new BaseRepository<IVisit>(Visit, { locationScoped: true });
+
+/**
+ * The location this request is working in. resolveLocation has already proved
+ * the caller may use it, so a missing one here is a routing mistake.
+ */
+const locationFrom = (scope: Scope) => {
+  if (!scope.locationId) {
+    throw new AppError('LOCATION_REQUIRED', 'X-Location-Id is required on this route');
+  }
+  return scope.locationId;
+};
 
 const toVisitView = (visit: VisitDoc, patient: PatientDoc | null): VisitView => ({
   id: String(visit._id),
@@ -15,7 +27,11 @@ const toVisitView = (visit: VisitDoc, patient: PatientDoc | null): VisitView => 
   patientId: String(visit.patientId),
   patient: patient ? toPatientView(patient) : null,
   date: visit.date,
+  token: visit.token,
+  reason: visit.reason,
   status: visit.status,
+  statusChangedAt: visit.statusChangedAt,
+  vitalsRecordedAt: visit.vitalsRecordedAt,
   createdAt: visit.createdAt,
 });
 
@@ -50,16 +66,22 @@ export const createVisit = async (scope: Scope, body: CreateVisitBody): Promise<
   const date = body.date ?? todayInKarachi();
 
   // Adding the same patient to the same day twice is a double tap, not a
-  // second visit, so the existing row comes back untouched.
+  // second visit, so the existing row comes back untouched - and no token is
+  // spent on it.
   const existing = await visits.findOne(scope, { patientId: patient._id, date });
   if (existing) {
     return toVisitView(existing, patient);
   }
 
+  const now = new Date();
   const visit = await visits.create(scope, {
     patientId: patient._id,
     date,
+    token: await nextVisitToken(scope.practiceId, locationFrom(scope), date),
+    reason: body.reason,
     status: 'waiting',
+    statusChangedAt: now,
+    vitalsRecordedAt: null,
     addedBy: scope.actorId,
   });
 
@@ -74,6 +96,9 @@ export const updateVisit = async (scope: Scope, id: string, patch: UpdateVisitBo
 
   if (from !== patch.status) {
     visit.status = patch.status;
+    // Not updatedAt: that moves when anything changes, and the queue wants to
+    // say "went in 6 minutes ago", not "was touched 6 minutes ago".
+    visit.statusChangedAt = new Date();
     await visit.save();
 
     await writeAudit(scope, {

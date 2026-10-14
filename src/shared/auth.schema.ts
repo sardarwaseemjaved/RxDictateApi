@@ -15,6 +15,13 @@ export const verifyOtpBodySchema = z.object({
 });
 export type VerifyOtpBody = z.infer<typeof verifyOtpBodySchema>;
 
+export const sendOtpResultSchema = z.object({
+  sent: z.literal(true),
+  /** Dev and test only: the code that was issued, so a sign-in needs no SMS. */
+  devCode: z.string().optional(),
+});
+export type SendOtpResult = z.infer<typeof sendOtpResultSchema>;
+
 export const refreshBodySchema = z.object({
   refreshToken: z.string().min(1),
 });

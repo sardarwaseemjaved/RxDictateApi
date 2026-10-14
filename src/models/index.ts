@@ -19,6 +19,7 @@ export { Vital, type IVital, type VitalDoc } from './vital.model';
 export { Appointment, type IAppointment, type AppointmentDoc } from './appointment.model';
 export { Device, type IDevice, type DeviceDoc } from './device.model';
 export { RefreshToken, type IRefreshToken, type RefreshTokenDoc } from './refreshToken.model';
+export { Counter, type ICounter, type CounterDoc } from './counter.model';
 
 /* eslint-disable import/first */
 import { Practice } from './practice.model';
@@ -40,6 +41,7 @@ import { Vital } from './vital.model';
 import { Appointment } from './appointment.model';
 import { Device } from './device.model';
 import { RefreshToken } from './refreshToken.model';
+import { Counter } from './counter.model';
 
 /**
  * Every collection, including the ones no route touches yet.
@@ -67,6 +69,7 @@ export const allModels = [
   Appointment,
   Device,
   RefreshToken,
+  Counter,
 ];
 
 /**

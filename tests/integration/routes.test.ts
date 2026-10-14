@@ -43,17 +43,19 @@ const BUILT: Route[] = [
   { method: 'get', path: '/api/v1/prescriptions', location: true },
 
   { method: 'get', path: '/api/v1/drugs?q=panadol' },
+
+  { method: 'get', path: '/api/v1/appointments?from=2026-10-01&to=2026-10-31', location: true },
+  { method: 'get', path: '/api/v1/follow-ups', location: true },
+
+  { method: 'get', path: '/api/v1/notifications' },
+  { method: 'post', path: '/api/v1/notifications/read', body: { ids: ['6540000000000000000000aa'] } },
 ];
 
 /** Mounted now, answering 501, so nothing is renamed when they go live. */
 const NOT_IMPLEMENTED: Route[] = [
-  { method: 'get', path: '/api/v1/notifications' },
-  { method: 'post', path: '/api/v1/notifications/read', body: { ids: ['6540000000000000000000aa'] } },
   { method: 'post', path: '/api/v1/devices', body: { pushToken: 'abc', platform: 'ios' } },
   { method: 'get', path: '/api/v1/templates' },
   { method: 'post', path: '/api/v1/templates' },
-  { method: 'get', path: '/api/v1/appointments', location: true },
-  { method: 'post', path: '/api/v1/appointments', location: true },
   { method: 'get', path: '/api/v1/portal/anything' },
 ];
 
@@ -159,8 +161,6 @@ describe('Every route in the product responds', () => {
     // 501, but mounted and spelled as they will stay.
     const history = await request(app).get(`/api/v1/patients/${patientId}/history`).set(headersFor(doctor)).expect(501);
     expect(history.body.error.code).toBe('NOT_IMPLEMENTED');
-    await request(app).post(`/api/v1/patients/${patientId}/reports`).set(headersFor(doctor)).expect(501);
-    await request(app).get(`/api/v1/reports/${patientId}`).set(headersFor(doctor)).expect(501);
     await request(app).post(`/api/v1/prescriptions/from-template/${patientId}`).set(headers).expect(501);
   });
 

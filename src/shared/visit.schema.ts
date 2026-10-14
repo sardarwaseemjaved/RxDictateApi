@@ -12,6 +12,18 @@ export const visitViewSchema = z.object({
   patient: patientViewSchema.nullable(),
   /** The Karachi calendar day the patient is on the list for. */
   date: dateStringSchema,
+  /**
+   * The number called out in the waiting room. Starts at 1 each day at each
+   * location, and is never reused - a removed visit takes its token with it,
+   * because the patient holding that slip has already heard it.
+   */
+  token: z.number().int().min(1),
+  /** Why they came, in the PA's words: "Fever 3 days". */
+  reason: z.string(),
+  /** When the visit entered its current status, for "went in 6 min ago". */
+  statusChangedAt: z.coerce.date(),
+  /** Null until vitals are saved. Drives "Vitals done" against "Add vitals". */
+  vitalsRecordedAt: z.coerce.date().nullable(),
   status: visitStatusSchema,
   createdAt: z.coerce.date(),
 });
@@ -21,6 +33,7 @@ export const createVisitBodySchema = z.object({
   patientId: objectIdSchema,
   /** Defaults to today in Asia/Karachi, which is what the PA almost always wants. */
   date: dateStringSchema.optional(),
+  reason: z.string().trim().max(500).default(''),
 });
 export type CreateVisitBody = z.infer<typeof createVisitBodySchema>;
 

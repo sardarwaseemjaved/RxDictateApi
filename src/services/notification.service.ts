@@ -1,6 +1,16 @@
-import type { Types } from 'mongoose';
-import { Membership, Notification } from '../models';
-import type { NotificationType } from '../shared/notification.schema';
+import { Types } from 'mongoose';
+import { Membership, Notification, type INotification, type NotificationDoc } from '../models';
+import { BaseRepository, type Scope } from '../core/db';
+import type {
+  ListNotificationsQuery,
+  MarkNotificationsReadBody,
+  NotificationType,
+  NotificationView,
+  NotificationsMeta,
+} from '../shared/notification.schema';
+
+// Not soft-deleted: a notification is read or it is not.
+const notifications = new BaseRepository<INotification>(Notification, { softDelete: false });
 
 export interface NewNotification {
   practiceId: Types.ObjectId;
@@ -53,4 +63,64 @@ export const notifyPractice = async (
   );
 };
 
-export default { notify, notifyPractice, membersOf };
+const toNotificationView = (notification: NotificationDoc): NotificationView => ({
+  id: String(notification._id),
+  type: notification.type,
+  refId: notification.refId ? String(notification.refId) : null,
+  title: notification.title,
+  body: notification.body,
+  readAt: notification.readAt,
+  createdAt: notification.createdAt,
+});
+
+/**
+ * This person's inbox in this clinic, newest first.
+ *
+ * `meta.unread` is the badge: every unread notification, not the unread ones
+ * on this page, because a badge that only counts the first twenty is worse
+ * than no badge.
+ */
+export const listNotifications = async (
+  scope: Scope,
+  query: ListNotificationsQuery,
+): Promise<{ notifications: NotificationView[]; meta: NotificationsMeta }> => {
+  const mine = { userId: scope.actorId };
+
+  const result = await notifications.paginate(
+    scope,
+    { ...mine, ...(query.unreadOnly ? { readAt: null } : {}) },
+    { page: query.page, limit: query.limit, sortBy: 'createdAt:desc' },
+  );
+  const unread = await notifications.count(scope, { ...mine, readAt: null });
+
+  return {
+    notifications: result.results.map(toNotificationView),
+    meta: {
+      page: result.page,
+      limit: result.limit,
+      total: result.totalResults,
+      totalPages: result.totalPages,
+      unread,
+    },
+  };
+};
+
+/**
+ * Mark some as read. Scoped to the caller's own rows, so a well-formed id
+ * belonging to somebody else simply matches nothing.
+ */
+export const markRead = async (scope: Scope, body: MarkNotificationsReadBody): Promise<{ read: number; unread: number }> => {
+  const result = await Notification.updateMany(
+    notifications.scopedFilter(scope, {
+      _id: { $in: body.ids.map((id) => new Types.ObjectId(id)) },
+      userId: scope.actorId,
+      readAt: null,
+    }),
+    { $set: { readAt: new Date() } },
+  );
+
+  const unread = await notifications.count(scope, { userId: scope.actorId, readAt: null });
+  return { read: result.modifiedCount, unread };
+};
+
+export default { notify, notifyPractice, membersOf, listNotifications, markRead, toNotificationView };

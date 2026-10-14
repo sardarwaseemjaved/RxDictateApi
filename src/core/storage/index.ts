@@ -19,6 +19,11 @@ export interface StorageDriver {
   put(key: string, body: Buffer, contentType: string): Promise<void>;
   /** Read the bytes back. Needed to retry a transcription without re-uploading. */
   get(key: string): Promise<Buffer>;
+  /**
+   * A URL the client can PUT straight to, so a phone photo never passes
+   * through the API. Not every driver can issue one.
+   */
+  signedPutUrl?(key: string, contentType: string, expiresInSeconds: number): Promise<string>;
   signedGetUrl(key: string, expiresInSeconds: number): Promise<string>;
   remove(key: string): Promise<void>;
 }
@@ -47,6 +52,20 @@ export const reportKey = (
   patientId: Types.ObjectId | string,
   filename: string,
 ): string => `${practiceId}/reports/${patientId}/${filename}`;
+
+/**
+ * Where one uploaded page lands before it belongs to a report.
+ *
+ * Keyed by practice and a random id, and never by patient: the app asks for
+ * the URL before the report exists, and a key is not the place to record who a
+ * document is about.
+ */
+export const reportPageKey = (practiceId: Types.ObjectId | string, pageId: string, extension: string): string =>
+  `${practiceId}/reports/pages/${pageId}.${extension}`;
+
+/** The file extension for an uploaded report page. */
+export const reportExtensionFor = (contentType: string): string =>
+  ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' })[contentType] ?? 'bin';
 
 /** The file extension for an upload's content type. */
 export const extensionFor = (contentType: string): string =>
@@ -89,6 +108,11 @@ const s3Driver = (): StorageDriver => {
     },
     async signedGetUrl(key, expiresInSeconds) {
       return presign(client, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: expiresInSeconds });
+    },
+    async signedPutUrl(key, contentType, expiresInSeconds) {
+      return presign(client, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }), {
+        expiresIn: expiresInSeconds,
+      });
     },
     async remove(key) {
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
@@ -154,6 +178,33 @@ export const put = async (key: string, body: Buffer, contentType: string): Promi
 
 export const get = async (key: string): Promise<Buffer> => driver().get(key);
 
+/**
+ * A presigned PUT, or STORAGE_UNAVAILABLE when the configured driver cannot
+ * issue one. The local driver cannot: there is no signing and nothing to sign
+ * against, and answering with a URL the phone could not use would be worse
+ * than saying so.
+ */
+export const signedPutUrl = async (
+  key: string,
+  contentType: string,
+  expiresInSeconds: number = config.storage.signedUrlTtlSeconds,
+): Promise<{ url: string; expiresAt: Date }> => {
+  const active = driver();
+  if (!active.signedPutUrl) {
+    throw new AppError(
+      'STORAGE_UNAVAILABLE',
+      `Uploads need object storage. This server is running the "${active.name}" driver; set STORAGE_DRIVER=s3.`,
+    );
+  }
+  return {
+    url: await active.signedPutUrl(key, contentType, expiresInSeconds),
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+  };
+};
+
+/** Whether this server can hand out upload URLs at all. */
+export const supportsUploads = (): boolean => driver().signedPutUrl !== undefined;
+
 export const signedGetUrl = async (
   key: string,
   expiresInSeconds: number = config.storage.signedUrlTtlSeconds,
@@ -171,4 +222,18 @@ export const remove = async (key: string): Promise<void> => {
   }
 };
 
-export default { driver, put, get, signedGetUrl, remove, audioKey, prescriptionPdfKey, reportKey, extensionFor };
+export default {
+  driver,
+  put,
+  get,
+  signedGetUrl,
+  signedPutUrl,
+  supportsUploads,
+  remove,
+  audioKey,
+  prescriptionPdfKey,
+  reportKey,
+  reportPageKey,
+  extensionFor,
+  reportExtensionFor,
+};

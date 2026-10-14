@@ -62,6 +62,7 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
 
   'appointment.read': ['doctor', 'pa'],
   'appointment.create': ['doctor', 'pa'],
+  'appointment.cancel': ['doctor', 'pa'],
 
   'notification.read': ['doctor', 'pa'],
 };

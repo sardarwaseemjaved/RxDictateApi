@@ -1,3 +1,4 @@
+export * as appointmentValidation from './appointment.validation';
 export * as authValidation from './auth.validation';
 export * as drugValidation from './drug.validation';
 export * as locationValidation from './location.validation';
@@ -6,6 +7,8 @@ export * as notificationValidation from './notification.validation';
 export * as patientValidation from './patient.validation';
 export * as practiceValidation from './practice.validation';
 export * as prescriptionValidation from './prescription.validation';
+export * as reportValidation from './report.validation';
 export * as teamValidation from './team.validation';
 export * as visitValidation from './visit.validation';
+export * as vitalsValidation from './vitals.validation';
 export * as voiceValidation from './voice.validation';

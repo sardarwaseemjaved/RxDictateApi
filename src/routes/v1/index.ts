@@ -15,6 +15,7 @@ import deviceRoute from './device.route';
 import templateRoute from './template.route';
 import reportRoute from './report.route';
 import appointmentRoute from './appointment.route';
+import followUpRoute from './followUp.route';
 import portalRoute from './portal.route';
 import docsRoute from './docs.route';
 
@@ -41,12 +42,13 @@ const routes = [
   { path: '/prescriptions', route: prescriptionRoute },
   { path: '/voice', route: voiceRoute },
   { path: '/drugs', route: drugRoute },
-  // Written, not yet read.
+  { path: '/appointments', route: appointmentRoute },
+  { path: '/follow-ups', route: followUpRoute },
+  { path: '/reports', route: reportRoute },
   { path: '/notifications', route: notificationRoute },
+  // Not built yet; mounted so the app can link to them.
   { path: '/devices', route: deviceRoute },
   { path: '/templates', route: templateRoute },
-  { path: '/reports', route: reportRoute },
-  { path: '/appointments', route: appointmentRoute },
   { path: '/portal', route: portalRoute },
 ];
 

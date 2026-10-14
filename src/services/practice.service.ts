@@ -24,6 +24,7 @@ export const toPracticeView = (practice: PracticeDoc): PracticeView => ({
   ownerId: String(practice.ownerId),
   pmdcNo: practice.pmdcNo,
   qualifications: practice.qualifications,
+  speciality: practice.speciality,
   features: practice.features,
   settings: practice.settings,
 });
@@ -37,6 +38,7 @@ export const updatePractice = async (scope: Scope, patch: UpdatePracticeBody): P
   if (patch.name !== undefined) practice.name = patch.name;
   if (patch.pmdcNo !== undefined) practice.pmdcNo = patch.pmdcNo;
   if (patch.qualifications !== undefined) practice.qualifications = patch.qualifications;
+  if (patch.speciality !== undefined) practice.speciality = patch.speciality;
   // Merged rather than replaced, so a client that knows about one flag cannot
   // reset the ones it has never heard of.
   if (patch.features) practice.features = { ...practice.features, ...patch.features };

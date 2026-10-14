@@ -1,10 +1,14 @@
+export * as appointmentController from './appointment.controller';
 export * as authController from './auth.controller';
 export * as drugController from './drug.controller';
 export * as locationController from './location.controller';
 export * as meController from './me.controller';
+export * as notificationController from './notification.controller';
 export * as patientController from './patient.controller';
 export * as practiceController from './practice.controller';
 export * as prescriptionController from './prescription.controller';
+export * as reportController from './report.controller';
 export * as teamController from './team.controller';
 export * as visitController from './visit.controller';
+export * as vitalsController from './vitals.controller';
 export * as voiceController from './voice.controller';

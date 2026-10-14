@@ -1,8 +1,11 @@
-import { markNotificationsReadBodySchema, registerDeviceBodySchema } from '../shared/notification.schema';
-import { paginationQuerySchema } from '../shared/common';
+import {
+  listNotificationsQuerySchema,
+  markNotificationsReadBodySchema,
+  registerDeviceBodySchema,
+} from '../shared/notification.schema';
 
-// The routes answer 501 for now, but the shapes are settled so the app can be
-// written against them and nothing is renamed when they go live.
-export const listNotifications = { query: paginationQuerySchema };
+export const listNotifications = { query: listNotificationsQuerySchema };
 export const markRead = { body: markNotificationsReadBodySchema };
+// Devices still answer 501; the shape is settled so the app can be written
+// against it and nothing is renamed when push goes live.
 export const registerDevice = { body: registerDeviceBodySchema };

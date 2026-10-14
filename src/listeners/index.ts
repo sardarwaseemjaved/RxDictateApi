@@ -124,6 +124,38 @@ on('location.archived', async ({ practiceId, locationId, actorId }) => {
   });
 });
 
+/**
+ * The doctor is the one who needs to know, and the flagged readings are the
+ * reason it is worth telling him rather than leaving it on a screen he may not
+ * look at.
+ */
+on('vitals.recorded', async ({ practiceId, visitId, flaggedFields, actorId }) => {
+  await notifyPractice({
+    practiceId,
+    type: 'vitals.recorded',
+    refId: visitId,
+    title: 'Vitals recorded',
+    body:
+      flaggedFields.length > 0
+        ? `${flaggedFields.join(', ')} outside the normal range.`
+        : 'Vitals are within the normal range.',
+    actorId,
+    roles: ['doctor'],
+  });
+});
+
+on('appointment.booked', async ({ practiceId, appointmentId, at, actorId }) => {
+  await notifyPractice({
+    practiceId,
+    type: 'appointment.booked',
+    refId: appointmentId,
+    title: 'Appointment booked',
+    body: `A patient is booked for ${at.toISOString().slice(0, 10)}.`,
+    actorId,
+    roles: ['doctor'],
+  });
+});
+
 on('report.uploaded', async ({ practiceId, reportId, actorId }) => {
   await notifyPractice({
     practiceId,

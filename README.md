@@ -193,11 +193,57 @@ practice ids exist. Visits, prescriptions and voice also need `X-Location-Id`.
 | drugs         | `GET /drugs?q=`                                                                                                                                            | doctor                  |
 
 Mounted and answering **501**, so the app can link to them and nothing is renamed
-when they go live: `/notifications`, `/devices`, `/templates`,
-`/patients/:id/history`, `/patients/:id/reports`, `/reports/:id`,
-`/appointments`, `/portal/*`, `/prescriptions/from-template/:id`.
+when they go live: `/devices`, `/templates`, `/patients/:id/history`,
+`/portal/*`, `/prescriptions/from-template/:id`.
 
 In development, `GET /api/v1/docs` serves the OpenAPI document.
+
+## The assistant's screens
+
+The PA's day runs on four things, all of them live.
+
+**Today's queue.** Each visit carries a `token` - the number called out in the
+waiting room, starting at 1 each day at each location. It comes from an atomic
+counter in `counters`, so two registrations in the same second cannot collide,
+and it is never reused: a removed visit takes its number with it, because
+whoever is holding that slip has already heard it called. `statusChangedAt` is
+what "went in 6 min ago" counts from, and it moves on a status change and not
+on any other edit. `vitalsRecordedAt` is how the queue knows to offer "Add
+vitals" or report "Vitals done".
+
+**Registering a patient.** Every patient gets an `mrNo` like `MR-10001`,
+sequential within a practice from an atomic `$inc` on `practice.mrCounter`.
+Search matches a name, an MR number (with or without the prefix, in any case)
+or a phone prefix; a bare number is tried as both, because at the desk "10001"
+is as likely to be a file number as the start of a phone. `allergies` and
+`noKnownAllergies` are kept apart on purpose: an empty list cannot tell you
+whether anybody asked, and that distinction matters on a prescription. A record
+that claims both is refused, including when the two halves arrive in separate
+requests.
+
+**Vitals.** `PUT /visits/:id/vitals` creates or replaces the one set of
+readings for a visit - a correction to a reading taken two minutes ago is a
+correction, not a second set of observations, and the previous values go into
+the audit entry. Normal ranges and the `vitalFlags()` that applies them live in
+[src/shared/vitals.schema.ts](src/shared/vitals.schema.ts) rather than on the
+server alone: the app highlights a reading as it is typed and the server flags
+the same reading for the doctor, and the two disagreeing in front of a patient
+would be worse than either being slightly wrong.
+
+**Reports.** Uploaded in two steps, because a phone photo of a lab sheet is
+several megabytes and should not pass through a request handler. `POST
+/reports/uploads` hands back a presigned PUT; `POST /patients/:id/reports`
+records what landed. A key issued to another clinic is refused. With the local
+storage driver there is nothing to sign against, so step one answers
+`STORAGE_UNAVAILABLE` and says to set `STORAGE_DRIVER=s3`.
+
+**The schedule.** Appointments are location-scoped and a slot is held by a
+unique partial index rather than by a check two simultaneous bookings would
+both pass; the second gets `CONFLICT`. Cancelling frees the slot and leaves the
+booking on record. `GET /follow-ups` is derived, not stored: an approved
+prescription whose `followUp` has a date, with no booked appointment pointing
+back at it. Booking one with its `prescriptionId` is what takes it off the
+list, so there is no second list to keep in step.
 
 ## Permissions
 
@@ -367,8 +413,9 @@ handler and editing no prescription code.
   nobody has prescribed before is inserted, and the next time it matches. A
   doctor's working repertoire is 200-400 drugs, so a text index with a prefix
   fallback is plenty and Atlas Search is not needed.
-- **No notification UI.** The rows are being written from day one, so turning the
-  inbox on later is a screen rather than a backfill.
+- **No push.** `POST /devices` answers 501. The inbox itself is live and the
+  rows have been written since the first commit, so there was nothing to
+  backfill when it went in.
 
 ## Testing
 
