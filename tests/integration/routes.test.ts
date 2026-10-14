@@ -154,6 +154,7 @@ describe('Every route in the product responds', () => {
       .send({ ops: [{ op: 'add', section: 'advice', value: { text: 'Rest' } }] })
       .expect(200);
     await request(app).get(`/api/v1/prescriptions/${id}/voice`).set(headers).expect(200);
+    await request(app).get(`/api/v1/prescriptions/${id}/preview`).set(headers).expect(200);
     await request(app).post(`/api/v1/prescriptions/${id}/approve`).set(headers).expect(200);
     await request(app).get(`/api/v1/prescriptions/${id}/pdf`).set(headers).expect(200);
     await request(app).post(`/api/v1/prescriptions/${id}/revise`).set(headers).send({}).expect(201);

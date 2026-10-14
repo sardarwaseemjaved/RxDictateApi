@@ -47,6 +47,20 @@ export const prescriptionPdfKey = (
   extension: string,
 ): string => `${practiceId}/rx/${prescriptionId}-v${version}.${extension}`;
 
+/**
+ * A preview is keyed by the version and the moment the draft last changed, so
+ * asking twice for an unchanged draft overwrites the same object and a changed
+ * one gets a new URL. Kept apart from the approved file, which must never be
+ * written by a preview.
+ */
+export const prescriptionPreviewKey = (
+  practiceId: Types.ObjectId | string,
+  prescriptionId: Types.ObjectId | string,
+  version: number,
+  stamp: number,
+  extension: string,
+): string => `${practiceId}/rx/preview/${prescriptionId}-v${version}-${stamp}.${extension}`;
+
 export const reportKey = (
   practiceId: Types.ObjectId | string,
   patientId: Types.ObjectId | string,
@@ -232,6 +246,7 @@ export default {
   remove,
   audioKey,
   prescriptionPdfKey,
+  prescriptionPreviewKey,
   reportKey,
   reportPageKey,
   extensionFor,

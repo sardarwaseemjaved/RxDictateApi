@@ -55,7 +55,7 @@ router.get(
   requireAuth,
   resolvePractice,
   requireCan('patient.history'),
-  validate(patientValidation.getPatient),
+  validate(patientValidation.getHistory),
   notImplemented('Patient history'),
 );
 

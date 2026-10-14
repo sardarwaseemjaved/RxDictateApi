@@ -92,6 +92,8 @@ const followUpSubSchema = new Schema(
     inDays: { type: Number, default: null },
     date: { type: String, default: null },
     note: { type: String, default: '' },
+    // "Ask the assistant to book it", which is what puts it on her list.
+    bookByAssistant: { type: Boolean, default: true },
   },
   { _id: false },
 );
@@ -144,7 +146,10 @@ const prescriptionSchema = new Schema<IPrescription>(
       dietEat: { type: [textItemSubSchema], default: [] },
       dietAvoid: { type: [textItemSubSchema], default: [] },
       advice: { type: [textItemSubSchema], default: [] },
-      followUp: { type: followUpSubSchema, default: () => ({ inDays: null, date: null, note: '' }) },
+      followUp: {
+        type: followUpSubSchema,
+        default: () => ({ inDays: null, date: null, note: '', bookByAssistant: true }),
+      },
     },
     printLanguage: { type: String, enum: ['en', 'en_ur'], default: 'en_ur' },
     letterheadSnapshot: { type: letterheadSnapshotSubSchema, default: null },
@@ -177,6 +182,22 @@ prescriptionSchema.index(
   { unique: true, partialFilterExpression: { number: { $type: 'string' } } },
 );
 prescriptionSchema.index({ practiceId: 1, locationId: 1, status: 1, createdAt: -1 });
+
+/**
+ * One open draft per visit, held by the database rather than by a check that
+ * two simultaneous creates would both pass - a double tap, or the doctor
+ * opening the same patient on a second device, must not produce two
+ * half-written prescriptions for one consultation.
+ *
+ * Partial on both counts: only drafts, because an approved prescription does
+ * not stop the next one, and only where visitId is actually an id, because
+ * several prescriptions written outside a visit all carry null and must not
+ * collide on it.
+ */
+prescriptionSchema.index(
+  { practiceId: 1, visitId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: 'draft', visitId: { $type: 'objectId' } } },
+);
 
 export const Prescription = mongoose.model<IPrescription, PaginateModel<IPrescription>>(
   'Prescription',

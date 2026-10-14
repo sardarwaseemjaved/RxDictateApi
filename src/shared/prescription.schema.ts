@@ -90,6 +90,16 @@ export const followUpSchema = z.object({
   inDays: z.number().int().min(0).max(3650).nullable().default(null),
   date: dateStringSchema.nullable().default(null),
   note: z.string().trim().max(500).default(''),
+  /**
+   * The tick box on the review screen: "ask the assistant to book the
+   * appointment". When it is off the doctor has told the patient to come back
+   * themselves, and it must not land on anybody's to-book list.
+   *
+   * Defaults to true, because that is the common case and the cost of being
+   * wrong in that direction is a line on a list rather than a patient nobody
+   * calls.
+   */
+  bookByAssistant: z.boolean().default(true),
 });
 export type FollowUp = z.infer<typeof followUpSchema>;
 
@@ -124,7 +134,7 @@ export const prescriptionSectionsSchema = z.object({
   dietEat: z.array(textItemSchema).default([]),
   dietAvoid: z.array(textItemSchema).default([]),
   advice: z.array(textItemSchema).default([]),
-  followUp: followUpSchema.default({ inDays: null, date: null, note: '' }),
+  followUp: followUpSchema.default({ inDays: null, date: null, note: '', bookByAssistant: true }),
 });
 export type PrescriptionSections = z.infer<typeof prescriptionSectionsSchema>;
 
@@ -204,6 +214,45 @@ export const opSchema = z.object({
   spanIds: z.array(z.string()).default([]),
 });
 export type Op = z.infer<typeof opSchema>;
+
+/* ------------------------------------------------------------------ *
+ * Views
+ * ------------------------------------------------------------------ */
+
+/**
+ * A prescription as the API returns it.
+ *
+ * The server builds its response by parsing through this schema rather than by
+ * assembling an object that happens to match, so the two cannot drift: a field
+ * added here without being filled in is a type error, and one returned without
+ * being declared here is stripped before it reaches the app.
+ */
+export const prescriptionViewSchema = z.object({
+  id: objectIdSchema,
+  locationId: objectIdSchema,
+  patientId: objectIdSchema,
+  visitId: objectIdSchema.nullable(),
+  doctorId: objectIdSchema,
+  /** Null until approval mints one. */
+  number: z.string().nullable(),
+  version: z.number().int().min(1),
+  previousVersionId: objectIdSchema.nullable(),
+  status: prescriptionStatusSchema,
+  source: prescriptionSourceSchema,
+  sections: prescriptionSectionsSchema,
+  printLanguage: printLanguageSchema,
+  /** Frozen at approval, so null while this is still a draft. */
+  letterheadSnapshot: letterheadSnapshotSchema.nullable(),
+  approvedAt: z.coerce.date().nullable(),
+  approvedBy: objectIdSchema.nullable(),
+  /** Whether a print file has been rendered yet, not where it is. */
+  hasPdf: z.boolean(),
+  /** How many corrections the doctor has made, which is the AI accuracy measure. */
+  editCount: z.number().int().min(0),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+export type PrescriptionView = z.infer<typeof prescriptionViewSchema>;
 
 /* ------------------------------------------------------------------ *
  * Requests

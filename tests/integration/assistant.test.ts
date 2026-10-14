@@ -639,6 +639,29 @@ describe('The assistant flow', () => {
       expect(list.body.data[0].dueDate > todayInKarachi()).toBe(true);
     });
 
+    test('a follow-up the doctor said not to book is not on the list', async () => {
+      const { doctor, patientId } = await aClinic('+923007770054');
+      const headers = headersFor(doctor, { location: true });
+
+      // The doctor told the patient to come back themselves, so nobody is
+      // asked to ring them.
+      await anApprovedRxWithFollowUp(doctor, patientId, { date: '2026-12-01', bookByAssistant: false });
+
+      const list = await request(app).get('/api/v1/follow-ups').set(headers).expect(200);
+      expect(list.body.data).toHaveLength(0);
+    });
+
+    test('the tick box defaults to on, so an unticked follow-up is still listed', async () => {
+      const { doctor, patientId } = await aClinic('+923007770055');
+      const headers = headersFor(doctor, { location: true });
+
+      // No bookByAssistant in the op at all.
+      await anApprovedRxWithFollowUp(doctor, patientId, { date: '2026-12-01' });
+
+      const list = await request(app).get('/api/v1/follow-ups').set(headers).expect(200);
+      expect(list.body.data).toHaveLength(1);
+    });
+
     test('a prescription with no follow-up is not on the list', async () => {
       const { doctor, patientId } = await aClinic('+923007770052');
       const headers = headersFor(doctor, { location: true });

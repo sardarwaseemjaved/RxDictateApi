@@ -23,7 +23,16 @@ export const getPrescription = catchAsync(async (req, res) => {
 });
 
 export const createPrescription = catchAsync(async (req, res) => {
-  sendCreated(res, await prescriptionService.createPrescription(scopeFrom(req), req.body as CreatePrescriptionBody));
+  const { prescription, created } = await prescriptionService.createPrescription(
+    scopeFrom(req),
+    req.body as CreatePrescriptionBody,
+  );
+  // 201 for a draft this call made, 200 for the one that was already open.
+  if (created) {
+    sendCreated(res, prescription);
+  } else {
+    sendData(res, prescription);
+  }
 });
 
 export const patchPrescription = catchAsync(async (req, res) => {
@@ -44,6 +53,11 @@ export const revisePrescription = catchAsync(async (req, res) => {
     res,
     await prescriptionService.revisePrescription(scopeFrom(req), req.params.id, req.body as RevisePrescriptionBody),
   );
+});
+
+export const previewPrescription = catchAsync(async (req, res) => {
+  const { url, expiresAt, driver } = await prescriptionService.previewPrescription(scopeFrom(req), req.params.id);
+  sendData(res, { url, expiresAt }, { format: driver });
 });
 
 export const prescriptionPdf = catchAsync(async (req, res) => {

@@ -40,6 +40,7 @@ export const ERROR_CODES = [
   'RX_NOT_DRAFT',
   'RX_ALREADY_SUPERSEDED',
   'RX_NOT_APPROVED',
+  'RX_HAS_FLAGS',
   'OP_INVALID',
 
   // Voice
@@ -91,6 +92,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   RX_NOT_DRAFT: 409,
   RX_ALREADY_SUPERSEDED: 409,
   RX_NOT_APPROVED: 409,
+  RX_HAS_FLAGS: 409,
   OP_INVALID: 400,
 
   SEGMENT_OUT_OF_ORDER: 409,

@@ -85,7 +85,22 @@ router.post(
   prescriptionController.revisePrescription,
 );
 
-/** A short-lived signed URL. The PA may print, which is most of why she is here. */
+/**
+ * What the page will look like before it is signed. Marked DRAFT and carrying
+ * no number, so it cannot be mistaken for the real thing, and read-only
+ * permission because looking is not signing.
+ */
+router.get(
+  '/:id/preview',
+  requireAuth,
+  resolvePractice,
+  resolveLocation,
+  requireCan('prescription.read'),
+  validate(prescriptionValidation.previewPrescription),
+  prescriptionController.previewPrescription,
+);
+
+/** A short-lived signed URL of the approved document. The PA may print it. */
 router.get(
   '/:id/pdf',
   requireAuth,

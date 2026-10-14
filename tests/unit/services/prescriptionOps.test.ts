@@ -229,7 +229,9 @@ describe('The ops engine', () => {
     test('wireSections fills in a section a stored document predates', () => {
       const sections = wireSections({ complaints: [{ id: 'a1', text: 'Bukhar', sourceSpanIds: [] }] });
       expect(sections.medicines).toEqual([]);
-      expect(sections.followUp).toEqual({ inDays: null, date: null, note: '' });
+      // bookByAssistant included: a prescription stored before the tick box
+      // existed reads as the default it would have been given.
+      expect(sections.followUp).toEqual({ inDays: null, date: null, note: '', bookByAssistant: true });
     });
   });
 });

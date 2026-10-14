@@ -13,3 +13,4 @@ export const patchPrescription = { params: idParamSchema, body: patchPrescriptio
 export const approvePrescription = { params: idParamSchema };
 export const revisePrescription = { params: idParamSchema, body: revisePrescriptionBodySchema };
 export const prescriptionPdf = { params: idParamSchema };
+export const previewPrescription = { params: idParamSchema };

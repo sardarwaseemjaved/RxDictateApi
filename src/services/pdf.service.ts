@@ -1,9 +1,10 @@
 import config from '../config/config';
 import logger from '../config/logger';
-import { prescriptionPdfKey, put } from '../core/storage';
+import { prescriptionPdfKey, prescriptionPreviewKey, put } from '../core/storage';
 import type { PrescriptionDoc } from '../models';
 import type { LetterheadSnapshot, MedicineItem, PrescriptionSections, TextItem } from '../shared/prescription.schema';
 import { LIST_SECTIONS } from '../shared/prescription.schema';
+import { medicineInstruction } from '../shared/dose';
 import { wireSections } from './prescriptionOps.service';
 
 const escape = (value: string): string =>
@@ -29,15 +30,6 @@ const patternText = (medicine: MedicineItem): string => {
   }
   return `${pattern.m}-${pattern.a}-${pattern.n}`;
 };
-
-const timingText = (medicine: MedicineItem): string =>
-  ({
-    before_meal: 'before meals',
-    after_meal: 'after meals',
-    with_meal: 'with meals',
-    empty_stomach: 'empty stomach',
-    any: '',
-  })[medicine.timing];
 
 const letterheadHtml = (snapshot: LetterheadSnapshot, bilingual: boolean): string => {
   const timings = snapshot.timings
@@ -65,26 +57,28 @@ const letterheadHtml = (snapshot: LetterheadSnapshot, bilingual: boolean): strin
     </header>`;
 };
 
+/**
+ * The dose in figures, then the same dose in words.
+ *
+ * The figures are what a doctor reads back; the words are what the patient
+ * follows at home, which is why the Urdu line is the one that matters most on
+ * this page. Both come from medicineInstruction, so what the app showed while
+ * the doctor was typing is exactly what prints - and the timing is left off
+ * the figures, because the words already say it.
+ */
 const medicinesHtml = (medicines: MedicineItem[], bilingual: boolean): string =>
   `<ol class="medicines">${medicines
     .map((medicine) => {
       const line = [medicine.name, medicine.strength].filter(Boolean).join(' ');
-      const dose = [
-        patternText(medicine),
-        timingText(medicine),
-        medicine.durationDays ? `${medicine.durationDays} days` : '',
-      ]
+      const dose = [patternText(medicine), medicine.durationDays ? `${medicine.durationDays} days` : '']
         .filter(Boolean)
         .join(' &middot; ');
+      const urdu = bilingual ? medicineInstruction(medicine, 'ur') : '';
       return `<li>
         <div class="medicine-name">${escape(line)}</div>
         <div class="medicine-dose">${dose}</div>
-        ${medicine.instructionEn ? `<div class="medicine-note">${escape(medicine.instructionEn)}</div>` : ''}
-        ${
-          bilingual && medicine.instructionUr
-            ? `<div class="medicine-note-ur" dir="rtl" lang="ur">${escape(medicine.instructionUr)}</div>`
-            : ''
-        }
+        <div class="medicine-note">${escape(medicineInstruction(medicine, 'en'))}</div>
+        ${urdu ? `<div class="medicine-note-ur" dir="rtl" lang="ur">${escape(urdu)}</div>` : ''}
       </li>`;
     })
     .join('')}</ol>`;
@@ -120,19 +114,41 @@ const sectionsHtml = (sections: PrescriptionSections, bilingual: boolean): strin
  * location, so a clinic that changes its address tomorrow does not change a
  * page that was printed today.
  */
-export const prescriptionHtml = (prescription: PrescriptionDoc, patientName: string, patientAge: number | null): string => {
+export interface RenderOptions {
+  /**
+   * A preview of something not yet signed. Marked so a page that reaches a
+   * pharmacy by accident cannot be mistaken for a prescription, and with no
+   * number, because a draft has not been given one.
+   */
+  draft?: boolean;
+  /**
+   * The letterhead to print. A draft has no frozen snapshot yet, so a preview
+   * passes the live one; an approved prescription passes nothing and gets the
+   * snapshot it was signed with.
+   */
+  letterhead?: LetterheadSnapshot;
+}
+
+export const prescriptionHtml = (
+  prescription: PrescriptionDoc,
+  patientName: string,
+  patientAge: number | null,
+  options: RenderOptions = {},
+): string => {
   const bilingual = prescription.printLanguage === 'en_ur';
-  const snapshot = prescription.letterheadSnapshot ?? {
-    locationName: '',
-    address: '',
-    phone: '',
-    timings: [],
-    letterhead: { en: '', ur: '' },
-    doctorName: '',
-    qualifications: [],
-    pmdcNo: '',
-  };
+  const snapshot = options.letterhead ??
+    prescription.letterheadSnapshot ?? {
+      locationName: '',
+      address: '',
+      phone: '',
+      timings: [],
+      letterhead: { en: '', ur: '' },
+      doctorName: '',
+      qualifications: [],
+      pmdcNo: '',
+    };
   const sections = wireSections(prescription.sections);
+  const isDraft = options.draft === true;
 
   return `<!doctype html>
 <html lang="${bilingual ? 'en' : 'en'}">
@@ -161,19 +177,23 @@ export const prescriptionHtml = (prescription: PrescriptionDoc, patientName: str
       .medicine-note { font-size: 9pt; color: #555; }
       .medicine-note-ur { font-size: 11pt; }
       footer { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-top: 1px solid #ccc; padding-top: 2mm; }
+      .draft-band { background: #b00020; color: #fff; font-weight: 700; letter-spacing: 1pt; text-align: center; padding: 2mm; margin-bottom: 4mm; font-size: 10pt; }
+      .draft-mark { position: fixed; top: 45%; left: 0; right: 0; text-align: center; font-size: 56pt; font-weight: 800; color: rgba(176, 0, 32, 0.12); transform: rotate(-24deg); letter-spacing: 6pt; pointer-events: none; }
     </style>
   </head>
   <body>
+    ${isDraft ? '<div class="draft-mark">DRAFT</div>' : ''}
+    ${isDraft ? '<div class="draft-band">DRAFT &mdash; NOT VALID. This prescription has not been approved or signed.</div>' : ''}
     ${letterheadHtml(snapshot, bilingual)}
     <div class="patient">
       <span><strong>${escape(patientName)}</strong></span>
       ${patientAge !== null ? `<span>${patientAge} yrs</span>` : ''}
       <span>${prescription.approvedAt ? prescription.approvedAt.toISOString().slice(0, 10) : ''}</span>
-      <span>${escape(prescription.number ?? '')}</span>
+      <span>${isDraft ? '' : escape(prescription.number ?? '')}</span>
     </div>
     ${sectionsHtml(sections, bilingual)}
     <footer>
-      <span>${escape(prescription.number ?? '')} &middot; v${prescription.version}</span>
+      <span>${isDraft ? 'DRAFT' : escape(prescription.number ?? '')} &middot; v${prescription.version}</span>
       <span>${escape(snapshot.doctorName)}</span>
     </footer>
   </body>
@@ -220,4 +240,51 @@ export const renderPrescription = async (
   return key;
 };
 
-export default { renderPrescription, prescriptionHtml };
+/**
+ * Render a draft so the doctor can see what will print before signing it.
+ *
+ * Never written to the prescription's pdfKey: that file is the approved
+ * document, and a preview of an unsigned draft must not be able to become it.
+ * The key carries the version and the moment the draft last changed, so asking
+ * twice for an unchanged draft reuses one object and an edited draft gets a
+ * fresh URL rather than a stale page.
+ */
+export const renderPreview = async (
+  prescription: PrescriptionDoc,
+  patientName: string,
+  patientAge: number | null,
+  letterhead: LetterheadSnapshot,
+): Promise<string> => {
+  const draft = prescription.status === 'draft';
+  const html = prescriptionHtml(prescription, patientName, patientAge, {
+    draft,
+    // An approved prescription previews exactly as it was signed.
+    ...(draft ? { letterhead } : {}),
+  });
+  const stamp = prescription.updatedAt.getTime();
+
+  if (config.pdf.rendererUrl) {
+    try {
+      const response = await fetch(config.pdf.rendererUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/html' },
+        body: html,
+      });
+      if (!response.ok) {
+        throw new Error(`renderer answered ${response.status}`);
+      }
+      const pdf = Buffer.from(await response.arrayBuffer());
+      const key = prescriptionPreviewKey(prescription.practiceId, prescription._id, prescription.version, stamp, 'pdf');
+      await put(key, pdf, 'application/pdf');
+      return key;
+    } catch (error) {
+      logger.error(`pdf renderer failed previewing prescription ${String(prescription._id)}: ${(error as Error).message}`);
+    }
+  }
+
+  const key = prescriptionPreviewKey(prescription.practiceId, prescription._id, prescription.version, stamp, 'html');
+  await put(key, Buffer.from(html, 'utf8'), 'text/html; charset=utf-8');
+  return key;
+};
+
+export default { renderPrescription, renderPreview, prescriptionHtml };

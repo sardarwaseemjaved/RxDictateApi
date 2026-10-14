@@ -1,8 +1,18 @@
 import request from 'supertest';
+import fs from 'fs';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
-import { aClinic, aDraft, headersFor } from '../fixtures/clinic.fixture';
+import { aClinic, aDraft, aPa, headersFor } from '../fixtures/clinic.fixture';
 import { AuditLog, Prescription } from '../../src/models';
+import { doseInstruction } from '../../src/shared/dose';
+
+/**
+ * The suite runs the local storage driver, whose signed URL is the path to the
+ * file, so a test can read the page that was rendered and check what is on it.
+ */
+const readPreview = (url: string): string =>
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  fs.readFileSync(url.replace('file://', ''), 'utf8');
 
 setupTestDB();
 
@@ -277,6 +287,329 @@ describe('Prescriptions', () => {
       const print = await request(app).get(`/api/v1/prescriptions/${draft.id}/pdf`).set(headers).expect(200);
       expect(print.body.data.url).toBeTruthy();
       expect(new Date(print.body.data.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    });
+  });
+
+  describe('one open draft per visit', () => {
+    test('a second create for the same visit returns the first, with 200 rather than 201', async () => {
+      const { doctor, patientId } = await aClinic('+923002220020');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+      const visitId = visit.body.data.id;
+
+      const first = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }).expect(201);
+      const second = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }).expect(200);
+
+      expect(second.body.data.id).toBe(first.body.data.id);
+      expect(await Prescription.countDocuments({ visitId })).toBe(1);
+    });
+
+    test('two devices at once still make only one draft', async () => {
+      const { doctor, patientId } = await aClinic('+923002220021');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+      const visitId = visit.body.data.id;
+
+      const [a, b] = await Promise.all([
+        request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }),
+        request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }),
+      ]);
+
+      expect([a.status, b.status].sort()).toEqual([200, 201]);
+      expect(a.body.data.id).toBe(b.body.data.id);
+    });
+
+    test('an approved prescription does not block a new draft for the same visit', async () => {
+      const { doctor, patientId } = await aClinic('+923002220022');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+      const visitId = visit.body.data.id;
+
+      const first = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }).expect(201);
+      await request(app)
+        .patch(`/api/v1/prescriptions/${first.body.data.id}`)
+        .set(headers)
+        .send(addMedicine('Panadol'))
+        .expect(200);
+      await request(app).post(`/api/v1/prescriptions/${first.body.data.id}/approve`).set(headers).expect(200);
+
+      // The consultation is over; a second one that day starts fresh.
+      const next = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }).expect(201);
+      expect(next.body.data.id).not.toBe(first.body.data.id);
+    });
+
+    test('without a visit, every create is a new draft', async () => {
+      const { doctor, patientId } = await aClinic('+923002220023');
+      const headers = headersFor(doctor, { location: true });
+
+      const a = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
+      const b = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
+      expect(a.body.data.id).not.toBe(b.body.data.id);
+    });
+  });
+
+  describe('the complaints the assistant already took', () => {
+    test('start on the draft, and count as an edit like any other change', async () => {
+      const { doctor, patientId } = await aClinic('+923002220030');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+
+      await request(app)
+        .put(`/api/v1/visits/${visit.body.data.id}/vitals`)
+        .set(headers)
+        .send({ pulse: 88, complaints: 'Fever and body aches since Monday' })
+        .expect(200);
+
+      const draft = await request(app)
+        .post('/api/v1/prescriptions')
+        .set(headers)
+        .send({ patientId, visitId: visit.body.data.id })
+        .expect(201);
+
+      expect(draft.body.data.sections.complaints).toHaveLength(1);
+      expect(draft.body.data.sections.complaints[0].text).toBe('Fever and body aches since Monday');
+      // Through the ordinary op path, so it is in the edit log.
+      expect(draft.body.data.editCount).toBe(1);
+    });
+
+    test('a later edit is never overwritten by a second create', async () => {
+      const { doctor, patientId } = await aClinic('+923002220031');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+      await request(app)
+        .put(`/api/v1/visits/${visit.body.data.id}/vitals`)
+        .set(headers)
+        .send({ pulse: 88, complaints: 'Fever' })
+        .expect(200);
+
+      const draft = await request(app)
+        .post('/api/v1/prescriptions')
+        .set(headers)
+        .send({ patientId, visitId: visit.body.data.id })
+        .expect(201);
+
+      const itemId = draft.body.data.sections.complaints[0].id;
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.body.data.id}`)
+        .set(headers)
+        .send({ ops: [{ op: 'update', section: 'complaints', itemId, value: { text: 'Fever, five days' } }] })
+        .expect(200);
+
+      const again = await request(app)
+        .post('/api/v1/prescriptions')
+        .set(headers)
+        .send({ patientId, visitId: visit.body.data.id })
+        .expect(200);
+
+      expect(again.body.data.sections.complaints).toHaveLength(1);
+      expect(again.body.data.sections.complaints[0].text).toBe('Fever, five days');
+    });
+
+    test('nothing is added when the vitals carry no complaints', async () => {
+      const { doctor, patientId } = await aClinic('+923002220032');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+      await request(app).put(`/api/v1/visits/${visit.body.data.id}/vitals`).set(headers).send({ pulse: 88 }).expect(200);
+
+      const draft = await request(app)
+        .post('/api/v1/prescriptions')
+        .set(headers)
+        .send({ patientId, visitId: visit.body.data.id })
+        .expect(201);
+
+      expect(draft.body.data.sections.complaints).toHaveLength(0);
+      expect(draft.body.data.editCount).toBe(0);
+    });
+  });
+
+  describe('a flagged line blocks approval', () => {
+    const flagged = (name: string, flags: string[]) => ({
+      ops: [{ op: 'add', section: 'medicines', value: { name, flags } }],
+    });
+
+    test('approve answers RX_HAS_FLAGS and names the lines', async () => {
+      const { doctor, patientId } = await aClinic('+923002220040');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send(flagged('Augmentin', ['dose_unclear']))
+        .expect(200);
+      const withFlag = await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send(flagged('Mystery syrup', ['drug_unknown']))
+        .expect(200);
+
+      const refused = await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(409);
+      expect(refused.body.error.code).toBe('RX_HAS_FLAGS');
+      expect(refused.body.error.details.itemIds).toEqual(
+        withFlag.body.data.sections.medicines.map((m: { id: string }) => m.id),
+      );
+
+      // Nothing was signed, and no number was spent.
+      const unchanged = await Prescription.findById(draft.id);
+      expect(unchanged?.status).toBe('draft');
+      expect(unchanged?.number).toBeNull();
+    });
+
+    test('a typed correction clears the flag and lets it through', async () => {
+      const { doctor, patientId } = await aClinic('+923002220041');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+
+      const added = await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send(flagged('Augmentin', ['dose_unclear']))
+        .expect(200);
+      await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(409);
+
+      const itemId = added.body.data.sections.medicines[0].id;
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send({ ops: [{ op: 'update', section: 'medicines', itemId, value: { durationDays: 5 } }] })
+        .expect(200);
+
+      const approved = await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(200);
+      expect(approved.body.data.status).toBe('approved');
+    });
+
+    test('removing the flagged line also works', async () => {
+      const { doctor, patientId } = await aClinic('+923002220042');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+
+      await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Panadol')).expect(200);
+      const added = await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send(flagged('Mystery syrup', ['drug_unknown']))
+        .expect(200);
+
+      const itemId = added.body.data.sections.medicines[1].id;
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send({ ops: [{ op: 'remove', section: 'medicines', itemId }] })
+        .expect(200);
+
+      await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(200);
+    });
+  });
+
+  describe('preview', () => {
+    test('shows a draft, marked, with no number and a live letterhead', async () => {
+      const { doctor, patientId } = await aClinic('+923002220050', 'Dr Ayesha Khan');
+      const headers = headersFor(doctor, { location: true });
+      await request(app)
+        .patch(`/api/v1/locations/${doctor.locationId}`)
+        .set(headersFor(doctor))
+        .send({ name: 'Shifa Clinic', address: '12 Jail Road, Lahore' })
+        .expect(200);
+
+      const draft = await aDraft(doctor, patientId);
+      await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Panadol')).expect(200);
+
+      // /pdf still refuses a draft; /preview is the one that does not.
+      const pdf = await request(app).get(`/api/v1/prescriptions/${draft.id}/pdf`).set(headers).expect(409);
+      expect(pdf.body.error.code).toBe('RX_NOT_APPROVED');
+
+      const preview = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
+      expect(preview.body.data.url).toBeTruthy();
+      expect(new Date(preview.body.data.expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+      const page = readPreview(preview.body.data.url);
+      expect(page).toContain('DRAFT');
+      expect(page).toContain('NOT VALID');
+      // The letterhead is read live, because there is no frozen one yet.
+      expect(page).toContain('Shifa Clinic');
+      expect(page).toContain('12 Jail Road, Lahore');
+      expect(page).toContain('Dr Ayesha Khan');
+      expect(page).not.toMatch(/RX-\d{4}-\d{6}/);
+
+      // It is not the prescription's print file.
+      const stored = await Prescription.findById(draft.id);
+      expect(stored?.pdfKey).toBeNull();
+      expect(stored?.status).toBe('draft');
+    });
+
+    test('shows an approved prescription as it was signed, unmarked', async () => {
+      const { doctor, patientId } = await aClinic('+923002220051');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+      await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Panadol')).expect(200);
+      const approved = await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(200);
+
+      const preview = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
+      const page = readPreview(preview.body.data.url);
+
+      expect(page).not.toContain('NOT VALID');
+      expect(page).toContain(approved.body.data.number);
+    });
+
+    test('prints the Urdu dose line the app showed', async () => {
+      const { doctor, patientId } = await aClinic('+923002220052');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headers)
+        .send({
+          ops: [
+            {
+              op: 'add',
+              section: 'medicines',
+              value: { name: 'Panadol', strength: '500mg', pattern: { m: 1, a: 0, n: 1 }, timing: 'after_meal' },
+            },
+          ],
+        })
+        .expect(200);
+
+      const preview = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
+      const page = readPreview(preview.body.data.url);
+
+      expect(page).toContain(doseInstruction({ form: 'tab', pattern: { m: 1, a: 0, n: 1 }, timing: 'after_meal' }, 'ur'));
+      expect(page).toContain('1 tablet in the morning and at night, after meal');
+    });
+
+    test('an edit gives a fresh preview rather than a stale page', async () => {
+      const { doctor, patientId } = await aClinic('+923002220053');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+      await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Panadol')).expect(200);
+
+      const before = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
+      expect(readPreview(before.body.data.url)).toContain('Panadol');
+
+      await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Brufen')).expect(200);
+      const after = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
+
+      expect(after.body.data.url).not.toBe(before.body.data.url);
+      expect(readPreview(after.body.data.url)).toContain('Brufen');
+    });
+
+    test('a PA may look but still may not approve', async () => {
+      const { doctor, patientId } = await aClinic('+923002220054');
+      const pa = await aPa(doctor, '+923002220055');
+      const paHeaders = {
+        Authorization: `Bearer ${pa.accessToken}`,
+        'X-Practice-Id': doctor.practiceId,
+        'X-Location-Id': doctor.locationId,
+      };
+      const draft = await aDraft(doctor, patientId);
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.id}`)
+        .set(headersFor(doctor, { location: true }))
+        .send(addMedicine('Panadol'))
+        .expect(200);
+
+      await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(paHeaders).expect(200);
+      await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(paHeaders).expect(403);
     });
   });
 

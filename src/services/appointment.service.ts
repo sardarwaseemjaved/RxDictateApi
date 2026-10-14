@@ -167,6 +167,12 @@ export const listFollowUps = async (
     status: 'approved',
     deletedAt: null,
     $or: [{ 'sections.followUp.date': { $ne: null } }, { 'sections.followUp.inDays': { $ne: null } }],
+    /**
+     * Only the ones the doctor ticked "ask the assistant to book". $ne: false
+     * rather than true, so a prescription written before the tick box existed
+     * reads as the default it would have been given.
+     */
+    'sections.followUp.bookByAssistant': { $ne: false },
   }).sort({ approvedAt: -1 });
 
   // One query rather than one per prescription.

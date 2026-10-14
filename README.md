@@ -179,18 +179,18 @@ Base path `/api/v1`. Everything except `/auth` needs `X-Practice-Id`; `/me` is t
 exception that proves the rule, since its answer is what tells the app which
 practice ids exist. Visits, prescriptions and voice also need `X-Location-Id`.
 
-| Module        | Routes                                                                                                                                                     | Who                     |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| auth          | `POST /auth/otp/send`, `/auth/otp/verify`, `/auth/refresh`, `/auth/logout`                                                                                 | anyone                  |
-| me            | `GET /me`, `PATCH /me`                                                                                                                                     | signed in               |
-| practice      | `GET /practice`, `PATCH /practice`                                                                                                                         | doctor                  |
-| locations     | `GET`/`POST /locations`, `PATCH /locations/:id`, `POST /locations/:id/archive`                                                                             | doctor                  |
-| team          | `GET`/`POST /members`, `PATCH /members/:id`, `DELETE /members/:id`                                                                                         | doctor                  |
-| patients      | `GET /patients?q=`, `POST /patients`, `GET`/`PATCH /patients/:id`                                                                                          | doctor, PA              |
-| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`                                                                                              | doctor, PA              |
-| prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/pdf` | doctor (PA: read + pdf) |
-| voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                | doctor                  |
-| drugs         | `GET /drugs?q=`                                                                                                                                            | doctor                  |
+| Module        | Routes                                                                                                                                                                                       | Who                               |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| auth          | `POST /auth/otp/send`, `/auth/otp/verify`, `/auth/refresh`, `/auth/logout`                                                                                                                   | anyone                            |
+| me            | `GET /me`, `PATCH /me`                                                                                                                                                                       | signed in                         |
+| practice      | `GET /practice`, `PATCH /practice`                                                                                                                                                           | doctor                            |
+| locations     | `GET`/`POST /locations`, `PATCH /locations/:id`, `POST /locations/:id/archive`                                                                                                               | doctor                            |
+| team          | `GET`/`POST /members`, `PATCH /members/:id`, `DELETE /members/:id`                                                                                                                           | doctor                            |
+| patients      | `GET /patients?q=`, `POST /patients`, `GET`/`PATCH /patients/:id`                                                                                                                            | doctor, PA                        |
+| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`                                                                                                                                | doctor, PA                        |
+| prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/preview`, `GET /prescriptions/:id/pdf` | doctor (PA: read + preview + pdf) |
+| voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                                                  | doctor                            |
+| drugs         | `GET /drugs?q=`                                                                                                                                                                              | doctor                            |
 
 Mounted and answering **501**, so the app can link to them and nothing is renamed
 when they go live: `/devices`, `/templates`, `/patients/:id/history`,
@@ -344,11 +344,42 @@ edited, and this is the gate rule 6 rests on. An op that names a section that do
 not take it, invents a field, or addresses an item that is not there comes back as
 `OP_INVALID`.
 
+**Starting one.** `POST /prescriptions` with a `visitId` returns the draft that
+visit already has rather than opening a second — 200 for the existing one, 201
+for a new one — and a unique partial index decides it, so two devices tapping
+at once cannot both win. On creation only, any complaints the assistant
+recorded with the vitals are added to the draft through the ordinary op path,
+so they land in the edit log like any other change and a later edit is never
+overwritten.
+
 **Approval** mints the number with one atomic `$inc` on the practice counter —
 never read-then-write, which is how two prescriptions end up with the same number
 on a legal document — freezes the letterhead, and locks the document. **Revising**
 creates version 2 and marks version 1 `superseded`, so what the patient was handed
 stays exactly as it was printed.
+
+Approval is refused with `RX_HAS_FLAGS` while any medicine still carries one. A
+flag is the pipeline saying it was not sure — an unclear dose, a drug it could
+not place — and signing is the doctor's name on a legal document, so every
+uncertain line has to have been looked at. The app greys the button out; this is
+the part that cannot be got around. `details.itemIds` says which lines.
+
+**Preview** (`GET /prescriptions/:id/preview`) renders a draft through the same
+template the printer uses, so what the doctor checks is what prints. It is marked
+DRAFT — NOT VALID, carries no number, and builds the letterhead live because
+there is no frozen snapshot yet. It is never written to the prescription's
+`pdfKey`: a preview of an unsigned draft must not be able to become the approved
+file. The key carries the version and the moment the draft last changed, so an
+edit gives a fresh URL rather than a stale page.
+
+**The dose in words.** Each medicine prints an English and an Urdu instruction.
+When the doctor typed one it is used; otherwise `doseInstruction()` builds it
+from the form, the pattern and the timing — "1 tablet in the morning and at
+night, after meal". It lives in [src/shared/dose.ts](src/shared/dose.ts) because
+the app shows those words while the doctor is still editing and the page prints
+them an hour later; the two must not be able to disagree about what the patient
+was told. It is derived from the dose and never from the transcriber, so a typed
+prescription reads exactly like a dictated one.
 
 The print file is rendered on first ask rather than at approval, so an approval
 never waits on a renderer. With `PDF_RENDERER_URL` set, the HTML is posted there
