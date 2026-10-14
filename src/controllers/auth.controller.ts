@@ -10,8 +10,8 @@ export const sendOtp = catchAsync(async (req, res) => {
 });
 
 export const verifyOtp = catchAsync(async (req, res) => {
-  const { phone, code, name } = req.body as VerifyOtpBody;
-  sendData(res, await authService.verifyOtp(phone, code, name));
+  const { phone, code, name, intent } = req.body as VerifyOtpBody;
+  sendData(res, await authService.verifyOtp(phone, code, name, intent));
 });
 
 export const refresh = catchAsync(async (req, res) => {

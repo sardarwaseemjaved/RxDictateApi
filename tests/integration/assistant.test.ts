@@ -2,7 +2,8 @@ import request from 'supertest';
 import { Types } from 'mongoose';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
-import { aClinic, aPa, headersFor, pause, signIn, type SignedIn } from '../fixtures/clinic.fixture';
+import { aClinic, aPa, headersFor, pause, signIn, signUp, type SignedIn } from '../fixtures/clinic.fixture';
+import { provider as smsProvider } from '../../src/core/sms';
 import { Membership, Notification, Patient, Visit } from '../../src/models';
 import { todayInKarachi } from '../../src/utils/time';
 
@@ -742,6 +743,100 @@ describe('The assistant flow', () => {
 
       const still = await request(app).get('/api/v1/notifications').set(headersFor(doctor)).expect(200);
       expect(still.body.meta.unread).toBe(1);
+    });
+  });
+
+  describe('telling the assistant she was added', () => {
+    /**
+     * The message goes through core/sms, so the test watches the provider
+     * rather than a log line: that is the seam a real gateway will be dropped
+     * into, and it is what should still be covered when one is.
+     */
+    const watchSms = () => jest.spyOn(smsProvider(), 'send').mockResolvedValue(undefined);
+
+    test('names the doctor and the clinic, and says what to install', async () => {
+      const doctor = await signUp('+923007770080', 'Ayesha Khan');
+      await request(app).patch('/api/v1/practice').set(headersFor(doctor)).send({ name: 'Shifa Clinic' }).expect(200);
+
+      const send = watchSms();
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923007770081', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+      await pause(200);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      const [to, body] = send.mock.calls[0];
+      expect(to).toBe('+923007770081');
+      expect(body).toBe('Dr. Ayesha Khan added you to Shifa Clinic. Install the clinic app and sign in with this number.');
+      // Nothing about her role: that is the clinic's business, not the
+      // mobile network's.
+      expect(body).not.toContain('pa');
+    });
+
+    test('does not say Dr twice when the name already carries it', async () => {
+      const doctor = await signUp('+923007770082', 'Dr Imran');
+      const send = watchSms();
+
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923007770083', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+      await pause(200);
+
+      expect(send.mock.calls[0][1]).toMatch(/^Dr Imran added you to /);
+    });
+
+    test('falls back cleanly when the doctor has no name on file', async () => {
+      const doctor = await signUp('+923007770084');
+      const send = watchSms();
+
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923007770085', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+      await pause(200);
+
+      expect(send.mock.calls[0][1]).toMatch(/^You have been added to /);
+    });
+
+    test('is not sent again to a number that is already a member', async () => {
+      const doctor = await signUp('+923007770086', 'Ayesha Khan');
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923007770087', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+      await pause(200);
+
+      const send = watchSms();
+      const again = await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923007770087', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(409);
+      expect(again.body.error.code).toBe('ALREADY_MEMBER');
+      await pause(200);
+
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    test('a gateway that is down does not undo the membership', async () => {
+      const doctor = await signUp('+923007770088', 'Ayesha Khan');
+      jest.spyOn(smsProvider(), 'send').mockRejectedValue(new Error('gateway timeout'));
+
+      const added = await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923007770089', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+      await pause(200);
+
+      expect(added.body.data.status).toBe('active');
+      expect(await Membership.countDocuments({ practiceId: doctor.practiceId, status: 'active' })).toBe(2);
     });
   });
 

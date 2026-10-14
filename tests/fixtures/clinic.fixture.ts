@@ -17,24 +17,26 @@ export interface Headers extends Record<string, string> {
 /**
  * Sign in the way the app does: ask for a code, read it back, verify it.
  *
- * Outside production the server returns the code it issued as `devCode`, which
- * is what lets a test sign in without an SMS gateway. A brand new number gets a
- * clinic, a location and a doctor membership as a side effect, which is the
- * sign-up flow.
+ * Outside production the server returns the code it issued as `devCode`,
+ * which is what lets a test sign in without an SMS gateway.
+ *
+ * `intent` is the difference between the two buttons on the first screen, and
+ * it decides whether a number nobody has added gets a clinic of its own.
+ * Tests say which they meant through `signIn` or `signUp` below.
  */
-export const signIn = async (phone: string, name?: string): Promise<SignedIn> => {
+const verify = async (phone: string, name: string | undefined, intent: 'signIn' | 'signUp'): Promise<SignedIn> => {
   const send = await request(app).post('/api/v1/auth/otp/send').send({ phone }).expect(200);
   const code = send.body.data.devCode as string;
   if (!code) {
     throw new Error('the server did not return a devCode; is OTP_LOG_IN_DEV off?');
   }
 
-  const verify = await request(app)
+  const verified = await request(app)
     .post('/api/v1/auth/otp/verify')
-    .send({ phone, code, ...(name ? { name } : {}) })
+    .send({ phone, code, intent, ...(name ? { name } : {}) })
     .expect(200);
 
-  const session = verify.body.data;
+  const session = verified.body.data;
   const membership = session.memberships[0];
 
   return {
@@ -46,6 +48,12 @@ export const signIn = async (phone: string, name?: string): Promise<SignedIn> =>
     locationId: membership?.locations[0]?.id ?? '',
   };
 };
+
+/** Sign in an existing person. No clinic is created, whoever they are. */
+export const signIn = async (phone: string, name?: string): Promise<SignedIn> => verify(phone, name, 'signIn');
+
+/** A doctor pressing "set up your clinic": a new number gets one, an old one does not. */
+export const signUp = async (phone: string, name?: string): Promise<SignedIn> => verify(phone, name, 'signUp');
 
 /** The headers every route except /auth and /me needs. */
 export const headersFor = (actor: SignedIn, options: { location?: boolean | string } = {}): Headers => {
@@ -61,7 +69,7 @@ export const headersFor = (actor: SignedIn, options: { location?: boolean | stri
 
 /** A doctor with a clinic, plus a patient on today's list. */
 export const aClinic = async (phone: string, name = 'Dr Ayesha') => {
-  const doctor = await signIn(phone, name);
+  const doctor = await signUp(phone, name);
   const headers = headersFor(doctor, { location: true });
 
   const patient = await request(app)

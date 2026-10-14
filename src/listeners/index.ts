@@ -1,7 +1,7 @@
 import logger from '../config/logger';
 import { on } from '../core/events';
 import { sendMemberAdded } from '../core/sms';
-import { Practice } from '../models';
+import { Practice, User } from '../models';
 import { notify, notifyPractice } from '../services/notification.service';
 
 /**
@@ -64,9 +64,13 @@ on('prescription.revised', async ({ practiceId, prescriptionId, version, actorId
  * The one piece of outbound messaging that matters today: a PA who has just
  * been added has no idea she can sign in until she is told.
  */
-on('member.added', async ({ practiceId, userId, phone, role, membershipId, actorId }) => {
-  const practice = await Practice.findById(practiceId);
-  await sendMemberAdded(phone, practice?.name ?? 'the clinic', role);
+on('member.added', async ({ practiceId, userId, phone, membershipId, actorId }) => {
+  const [practice, addedBy] = await Promise.all([Practice.findById(practiceId), User.findById(actorId)]);
+
+  // A failure in here is caught by the bus and sendMemberAdded swallows its
+  // own, so a gateway that is down cannot undo the membership that was
+  // already created.
+  await sendMemberAdded(phone, addedBy?.name ?? '', practice?.name ?? 'the clinic');
   await notify({
     practiceId,
     userId,

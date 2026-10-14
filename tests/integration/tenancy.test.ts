@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
-import { aClinic, aPa, headersFor, signIn } from '../fixtures/clinic.fixture';
+import { aClinic, aPa, headersFor, signUp } from '../fixtures/clinic.fixture';
 import { Location, Patient } from '../../src/models';
 
 setupTestDB();
@@ -76,7 +76,7 @@ describe('Tenancy', () => {
 
   describe('headers', () => {
     test('a route needs X-Practice-Id', async () => {
-      const doctor = await signIn('+923001110009', 'Dr A');
+      const doctor = await signUp('+923001110009', 'Dr A');
       const response = await request(app)
         .get('/api/v1/patients')
         .set({ Authorization: `Bearer ${doctor.accessToken}` })

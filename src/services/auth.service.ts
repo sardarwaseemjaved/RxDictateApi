@@ -6,7 +6,7 @@ import { Location, Membership, OtpCode, Practice, User, type LocationDoc, type U
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { sendOtp as sendOtpSms } from '../core/sms';
-import type { MembershipView, Session, TokenPair } from '../shared/auth.schema';
+import type { AuthIntent, MembershipView, Session, TokenPair } from '../shared/auth.schema';
 import { addMinutes } from '../utils/time';
 import { generateAuthTokens, consumeRefreshToken, revokeRefreshToken } from './token.service';
 
@@ -101,16 +101,17 @@ const consumeOtp = async (phone: string, candidate: string): Promise<void> => {
 };
 
 /**
- * Everything a doctor needs to start working, created on his first sign-in: a
- * practice, one location called "My clinic", and his own membership as doctor.
+ * Everything a doctor needs to start working: a practice, one location called
+ * "My clinic", and his own membership as doctor.
  *
- * Only for a phone with no memberships at all. A PA has one before she ever
- * signs in, because the doctor created it when he typed her number, so she
- * lands straight in his clinic instead of getting a clinic of her own.
+ * Only ever called for someone who asked for a clinic and has none. Running it
+ * for any phone with no memberships was wrong: an assistant who signs in
+ * before the doctor adds her would get a clinic of her own, be walked through
+ * doctor setup, and end up belonging to two.
  *
  * The UI never says "practice". To the doctor this is just his clinic.
  */
-const bootstrapPractice = async (user: UserDoc): Promise<void> => {
+export const bootstrapPractice = async (user: UserDoc): Promise<void> => {
   const practice = await Practice.create({
     name: user.name ? `${user.name}'s clinic` : 'My clinic',
     ownerId: user._id,
@@ -214,11 +215,16 @@ const sessionFor = async (user: UserDoc, tokens: TokenPair, devCode?: string): P
 /**
  * Exchange a code for a session.
  *
- * The user is created here if the number is new, which is the whole sign-up
- * flow: there is no separate register endpoint, because a phone number that
- * verifies is a person.
+ * The user is created here if the number is new: there is no separate register
+ * endpoint, because a phone number that verifies is a person. Whether that
+ * person also gets a clinic is what `intent` decides.
  */
-export const verifyOtp = async (phone: string, code: string, name?: string): Promise<Session> => {
+export const verifyOtp = async (
+  phone: string,
+  code: string,
+  name?: string,
+  intent: AuthIntent = 'signIn',
+): Promise<Session> => {
   await consumeOtp(phone, code);
 
   let user = await User.findOne({ phone });
@@ -231,8 +237,13 @@ export const verifyOtp = async (phone: string, code: string, name?: string): Pro
   user.lastLoginAt = new Date();
   await user.save();
 
+  /**
+   * A clinic is created only when somebody asked for one. A signIn from a
+   * number nobody has added succeeds with no memberships, and the app shows
+   * its "this number isn't linked to a clinic yet" screen.
+   */
   const existing = await Membership.countDocuments({ userId: user._id, status: 'active' });
-  if (existing === 0) {
+  if (intent === 'signUp' && existing === 0) {
     await bootstrapPractice(user);
   }
 

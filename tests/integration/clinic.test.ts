@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
-import { aClinic, headersFor, pause, signIn } from '../fixtures/clinic.fixture';
+import { aClinic, headersFor, pause, signUp } from '../fixtures/clinic.fixture';
 import { Membership, Notification, Patient } from '../../src/models';
 import { todayInKarachi } from '../../src/utils/time';
 
@@ -207,7 +207,7 @@ describe('The day to day', () => {
 
   describe('locations', () => {
     test('the first one is the default whatever the caller says', async () => {
-      const doctor = await signIn('+923006660030', 'Dr Solo');
+      const doctor = await signUp('+923006660030', 'Dr Solo');
       const list = await request(app).get('/api/v1/locations').set(headersFor(doctor)).expect(200);
       expect(list.body.data[0].isDefault).toBe(true);
     });

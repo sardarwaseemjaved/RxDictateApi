@@ -7,13 +7,32 @@ export const sendOtpBodySchema = z.object({
 });
 export type SendOtpBody = z.infer<typeof sendOtpBodySchema>;
 
+/**
+ * Which button was pressed.
+ *
+ * It decides one thing: whether a phone with no memberships gets a clinic of
+ * its own. An assistant signing in before the doctor has added her must not,
+ * or she ends up running her own clinic and then belonging to two. Defaulting
+ * to signIn means the cautious answer is the one a caller gets by omission.
+ */
+export const authIntentSchema = z.enum(['signIn', 'signUp']);
+export type AuthIntent = z.infer<typeof authIntentSchema>;
+
 export const verifyOtpBodySchema = z.object({
   phone: phoneSchema,
   code: z.string().regex(/^\d{6}$/, 'must be the 6 digit code'),
-  /** Only used the very first time a phone signs in, to name the new practice. */
+  /** Used when this sign-up creates a clinic, to name it and the person. */
   name: z.string().trim().min(1).max(120).optional(),
+  intent: authIntentSchema.default('signIn'),
 });
 export type VerifyOtpBody = z.infer<typeof verifyOtpBodySchema>;
+
+/** Set up a clinic for a caller who signed in and has none. No body is required. */
+export const createPracticeBodySchema = z.object({
+  /** The doctor's name, when the app collected it on this screen. */
+  name: z.string().trim().min(1).max(120).optional(),
+});
+export type CreatePracticeBody = z.infer<typeof createPracticeBodySchema>;
 
 export const sendOtpResultSchema = z.object({
   sent: z.literal(true),

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
-import { headersFor, signIn } from '../fixtures/clinic.fixture';
+import { aPa, headersFor, signIn, signUp } from '../fixtures/clinic.fixture';
 import config from '../../src/config/config';
 import { Location, Membership, OtpCode, Practice, User } from '../../src/models';
 
@@ -63,7 +63,7 @@ describe('Auth', () => {
 
   describe('POST /api/v1/auth/otp/verify', () => {
     test('a brand new number gets a clinic, a location and a doctor membership', async () => {
-      const doctor = await signIn('+923004440010', 'Dr Imran');
+      const doctor = await signUp('+923004440010', 'Dr Imran');
 
       const practice = await Practice.findById(doctor.practiceId);
       expect(practice?.name).toBe("Dr Imran's clinic");
@@ -83,8 +83,8 @@ describe('Auth', () => {
     });
 
     test('signing in again does not create a second clinic', async () => {
-      const first = await signIn('+923004440011', 'Dr Imran');
-      const second = await signIn('+923004440011');
+      const first = await signUp('+923004440011', 'Dr Imran');
+      const second = await signUp('+923004440011');
 
       expect(second.practiceId).toBe(first.practiceId);
       expect(await Practice.countDocuments({})).toBe(1);
@@ -92,7 +92,7 @@ describe('Auth', () => {
     });
 
     test('a PA added by a doctor lands in his clinic, not one of her own', async () => {
-      const doctor = await signIn('+923004440012', 'Dr Imran');
+      const doctor = await signUp('+923004440012', 'Dr Imran');
       await request(app)
         .post('/api/v1/members')
         .set(headersFor(doctor))
@@ -149,6 +149,146 @@ describe('Auth', () => {
     });
   });
 
+  describe('a clinic is only created when somebody asked for one', () => {
+    /**
+     * The bug this prevents: an assistant signs in before the doctor has added
+     * her, gets a clinic of her own, is walked through doctor setup, and then
+     * belongs to two.
+     */
+    test('a signIn from an unknown number succeeds with no memberships', async () => {
+      const sent = await sendTo('+923004440080').expect(200);
+
+      const session = await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440080', code: sent.body.data.devCode, intent: 'signIn' })
+        .expect(200);
+
+      expect(session.body.data.memberships).toEqual([]);
+      expect(session.body.data.tokens.access.token).toBeTruthy();
+      expect(await Practice.countDocuments({})).toBe(0);
+      // The user exists; they simply belong to nothing yet.
+      expect(await User.countDocuments({ phone: '+923004440080' })).toBe(1);
+    });
+
+    test('signIn is the default, so an omitted intent never creates a clinic', async () => {
+      const sent = await sendTo('+923004440081').expect(200);
+
+      const session = await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440081', code: sent.body.data.devCode })
+        .expect(200);
+
+      expect(session.body.data.memberships).toEqual([]);
+      expect(await Practice.countDocuments({})).toBe(0);
+    });
+
+    test('signUp creates one', async () => {
+      const doctor = await signUp('+923004440082', 'Dr Imran');
+
+      expect(doctor.practiceId).toBeTruthy();
+      expect(await Practice.countDocuments({})).toBe(1);
+    });
+
+    test('an assistant who signs in before being added lands in his clinic afterwards', async () => {
+      const doctor = await signUp('+923004440083', 'Dr Imran');
+
+      // She tries the app first. Nothing is created for her.
+      const early = await signIn('+923004440084');
+      expect(early.practiceId).toBe('');
+      expect(await Practice.countDocuments({})).toBe(1);
+
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923004440084', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+
+      const after = await signIn('+923004440084');
+      expect(after.practiceId).toBe(doctor.practiceId);
+      // Still one clinic, and she is in it rather than in a second one.
+      expect(await Practice.countDocuments({})).toBe(1);
+      expect(await Membership.countDocuments({ userId: after.userId })).toBe(1);
+    });
+
+    test('signUp from a number that already belongs somewhere does not make a second clinic', async () => {
+      const doctor = await signUp('+923004440085', 'Dr Imran');
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(doctor))
+        .send({ phone: '+923004440086', role: 'pa', locationIds: [doctor.locationId] })
+        .expect(201);
+
+      // She presses the wrong button. She still lands in his clinic.
+      const pa = await signUp('+923004440086', 'Sana');
+      expect(pa.practiceId).toBe(doctor.practiceId);
+      expect(await Practice.countDocuments({})).toBe(1);
+    });
+  });
+
+  describe('POST /practices', () => {
+    test('sets up a clinic for someone already signed in, with no second code', async () => {
+      const user = await signIn('+923004440090');
+      expect(user.practiceId).toBe('');
+
+      const created = await request(app)
+        .post('/api/v1/practices')
+        .set({ Authorization: `Bearer ${user.accessToken}` })
+        .send({ name: 'Dr Imran' })
+        .expect(201);
+
+      // The same shape as GET /me, so the app can replace what it holds.
+      expect(created.body.data.id).toBe(user.userId);
+      expect(created.body.data.memberships).toHaveLength(1);
+      expect(created.body.data.memberships[0].role).toBe('doctor');
+      expect(created.body.data.memberships[0].practiceName).toBe("Dr Imran's clinic");
+      expect(created.body.data.memberships[0].locations[0].name).toBe('My clinic');
+
+      // The token they already held now works against the new clinic.
+      const { practiceId } = created.body.data.memberships[0];
+      await request(app)
+        .get('/api/v1/patients')
+        .set({ Authorization: `Bearer ${user.accessToken}`, 'X-Practice-Id': practiceId })
+        .expect(200);
+    });
+
+    test('needs no X-Practice-Id, because the point is that there is not one', async () => {
+      const user = await signIn('+923004440091');
+      await request(app)
+        .post('/api/v1/practices')
+        .set({ Authorization: `Bearer ${user.accessToken}` })
+        .send({})
+        .expect(201);
+    });
+
+    test('refuses someone who already has a clinic', async () => {
+      const doctor = await signUp('+923004440092', 'Dr Imran');
+
+      const response = await request(app)
+        .post('/api/v1/practices')
+        .set({ Authorization: `Bearer ${doctor.accessToken}` })
+        .send({})
+        .expect(409);
+      expect(response.body.error.code).toBe('CONFLICT');
+      expect(await Practice.countDocuments({})).toBe(1);
+    });
+
+    test('refuses an assistant who belongs to somebody else clinic', async () => {
+      const doctor = await signUp('+923004440093', 'Dr Imran');
+      const pa = await aPa(doctor, '+923004440094');
+
+      const response = await request(app)
+        .post('/api/v1/practices')
+        .set({ Authorization: `Bearer ${pa.accessToken}` })
+        .send({})
+        .expect(409);
+      expect(response.body.error.code).toBe('CONFLICT');
+    });
+
+    test('needs a token', async () => {
+      await request(app).post('/api/v1/practices').send({}).expect(401);
+    });
+  });
+
   describe('the fixed code, for testing a client', () => {
     afterEach(() => {
       config.otp.fixedCode = undefined;
@@ -164,7 +304,7 @@ describe('Auth', () => {
 
       const session = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440040', code: '123456', name: 'Dr Test' })
+        .send({ phone: '+923004440040', code: '123456', name: 'Dr Test', intent: 'signUp' })
         .expect(200);
       expect(session.body.data.memberships[0].role).toBe('doctor');
     });
@@ -211,7 +351,7 @@ describe('Auth', () => {
 
   describe('tokens', () => {
     test('a refresh token is single use and returns a fresh pair', async () => {
-      const doctor = await signIn('+923004440020');
+      const doctor = await signUp('+923004440020');
 
       const refreshed = await request(app)
         .post('/api/v1/auth/refresh')
@@ -224,7 +364,7 @@ describe('Auth', () => {
     });
 
     test('an access token cannot be used as a refresh token', async () => {
-      const doctor = await signIn('+923004440021');
+      const doctor = await signUp('+923004440021');
       const response = await request(app)
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: doctor.accessToken })
@@ -233,7 +373,7 @@ describe('Auth', () => {
     });
 
     test('a refresh token cannot be used as an access token', async () => {
-      const doctor = await signIn('+923004440022');
+      const doctor = await signUp('+923004440022');
       const response = await request(app)
         .get('/api/v1/me')
         .set({ Authorization: `Bearer ${doctor.refreshToken}` })
@@ -242,7 +382,7 @@ describe('Auth', () => {
     });
 
     test('logout revokes the refresh token', async () => {
-      const doctor = await signIn('+923004440023');
+      const doctor = await signUp('+923004440023');
       await request(app).post('/api/v1/auth/logout').send({ refreshToken: doctor.refreshToken }).expect(200);
 
       const response = await request(app)
@@ -255,7 +395,7 @@ describe('Auth', () => {
 
   describe('GET /api/v1/me', () => {
     test('answers with the user and every clinic and location they can work at', async () => {
-      const doctor = await signIn('+923004440030', 'Dr Imran');
+      const doctor = await signUp('+923004440030', 'Dr Imran');
       await request(app).post('/api/v1/locations').set(headersFor(doctor)).send({ name: 'Clifton branch' }).expect(201);
 
       const me = await request(app)
@@ -271,7 +411,7 @@ describe('Auth', () => {
     });
 
     test('needs no practice header, because its answer is what provides one', async () => {
-      const doctor = await signIn('+923004440031');
+      const doctor = await signUp('+923004440031');
       await request(app)
         .get('/api/v1/me')
         .set({ Authorization: `Bearer ${doctor.accessToken}` })
@@ -279,7 +419,7 @@ describe('Auth', () => {
     });
 
     test('a PA sees only the locations she was assigned', async () => {
-      const doctor = await signIn('+923004440032', 'Dr Imran');
+      const doctor = await signUp('+923004440032', 'Dr Imran');
       await request(app).post('/api/v1/locations').set(headersFor(doctor)).send({ name: 'Clifton branch' }).expect(201);
       await request(app)
         .post('/api/v1/members')

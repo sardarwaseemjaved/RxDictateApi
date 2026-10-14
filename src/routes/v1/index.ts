@@ -3,6 +3,7 @@ import config from '../../config/config';
 import authRoute from './auth.route';
 import meRoute from './me.route';
 import practiceRoute from './practice.route';
+import practicesRoute from './practices.route';
 import locationRoute from './location.route';
 import teamRoute from './team.route';
 import patientRoute from './patient.route';
@@ -35,6 +36,7 @@ const routes = [
   { path: '/auth', route: authRoute },
   { path: '/me', route: meRoute },
   { path: '/practice', route: practiceRoute },
+  { path: '/practices', route: practicesRoute },
   { path: '/locations', route: locationRoute },
   { path: '/members', route: teamRoute },
   { path: '/patients', route: patientRoute },

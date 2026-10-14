@@ -72,6 +72,8 @@ const envSchema = z.object({
 
   SMS_PROVIDER: z.enum(['log']).default('log'),
   SMS_SENDER_ID: z.string().default('Clinic'),
+  /** What the app is called in an SMS: "Install <this> and sign in". */
+  APP_NAME: z.string().min(1).max(60).default('the clinic app'),
 
   /** Speech to text and the ops extractor. `none` fails a segment with a clear error. */
   STT_PROVIDER: z.enum(['none', 'mock']).default('none'),
@@ -166,6 +168,7 @@ const config = {
   sms: {
     provider: env.SMS_PROVIDER,
     senderId: env.SMS_SENDER_ID,
+    appName: env.APP_NAME,
   },
   voice: {
     sttProvider: env.STT_PROVIDER,

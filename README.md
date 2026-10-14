@@ -237,6 +237,15 @@ records what landed. A key issued to another clinic is refused. With the local
 storage driver there is nothing to sign against, so step one answers
 `STORAGE_UNAVAILABLE` and says to set `STORAGE_DRIVER=s3`.
 
+**Being added.** When the doctor adds a number, that person gets a text —
+"Dr. Ayesha Khan added you to Shifa Clinic. Install the clinic app and sign in
+with this number." — naming who added them, because this arrives unprompted on
+the phone of somebody who may not be expecting it. It says nothing about their
+role. A number that is already a member is refused before any message is sent,
+and a gateway that is down is logged and ignored: the member has still been
+added. Outside production the `log` provider prints the whole message, so it
+can be read on a dev box with no gateway.
+
 **The schedule.** Appointments are location-scoped and a slot is held by a
 unique partial index rather than by a check two simultaneous bookings would
 both pass; the second gets `CONFLICT`. Cancelling frees the slot and leaves the
@@ -280,11 +289,21 @@ Phone and a one-time code. There is no password anywhere in this product.
   production, because with it set anybody who knows a phone number can sign in as
   its owner. [tests/unit/config/config.test.ts](tests/unit/config/config.test.ts)
   holds that guard down.
-- A phone number that verifies is a person, so there is no separate sign-up. A
-  user with **no memberships at all** gets a practice, one location called "My
-  clinic", and a doctor membership. A PA already has a membership before she first
-  signs in — the doctor made it when he typed her number — so she lands in his
-  clinic rather than getting one of her own.
+- A phone number that verifies is a person, so there is no separate sign-up
+  endpoint. Whether that person also gets a clinic is decided by `intent` on the
+  verify body: `signUp` (the "set up your clinic" button) creates a practice, one
+  location called "My clinic" and a doctor membership — but only for someone with
+  no memberships at all. `signIn` never creates anything, and is the default, so
+  the cautious answer is the one a caller gets by omission.
+- A `signIn` from a number nobody has added **succeeds**, with
+  `memberships: []`. That is the app's "this number isn't linked to a clinic yet"
+  screen. Its "set up my clinic" button calls `POST /practices`, which runs the
+  same bootstrap for a caller who is already signed in — no second code — and
+  answers `CONFLICT` if they already belong to one. It takes no `X-Practice-Id`,
+  because the whole point is that there is not one yet.
+- This matters more than it looks: bootstrapping on "no memberships" alone meant
+  an assistant who opened the app before the doctor added her got a clinic of her
+  own, was walked through doctor setup, and then belonged to two.
 - Refresh tokens are stored as a SHA-256 and consuming one deletes it, so a replay
   fails. Every token carries a `jti`, because `iat` has one-second resolution and
   two tokens signed in the same second would otherwise be identical.
