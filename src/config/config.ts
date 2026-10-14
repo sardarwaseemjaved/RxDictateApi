@@ -43,6 +43,13 @@ const envSchema = z.object({
   /** Seconds a phone must wait before another code is sent to it. */
   OTP_COOLDOWN_SECONDS: z.coerce.number().int().min(0).default(60),
   OTP_LOG_IN_DEV: booleanish(true),
+  /** A fixed sign-in code for testing a client. Six digits, or empty for random. */
+  OTP_FIXED_CODE: z
+    .string()
+    .regex(/^\d{6}$/, 'must be six digits')
+    .or(z.literal(''))
+    .optional()
+    .transform((value) => (value === '' ? undefined : value)),
 
   /** Comma separated list of origins the app and the web portal are served from. */
   CORS_ORIGINS: csv(),
@@ -122,6 +129,18 @@ const config = {
      * so a code is never handed back to the caller in production.
      */
     exposeInResponse: env.NODE_ENV !== 'production' && env.OTP_LOG_IN_DEV,
+    /**
+     * The same code for every sign-in, so a client can be tested without an SMS
+     * gateway and without reading a code out of a response.
+     *
+     * Forced to undefined in production whatever the environment says. With this
+     * set, anybody who knows a phone number can sign in as its owner - it is a
+     * complete bypass of authentication, not a convenience. Ignoring it is
+     * deliberate rather than fatal: a stray variable on a deployment should not
+     * take the API down, and silently falling back to random codes is the safe
+     * direction to fail in.
+     */
+    fixedCode: env.NODE_ENV === 'production' ? undefined : env.OTP_FIXED_CODE,
   },
   cors: {
     origins: env.CORS_ORIGINS.length > 0 ? env.CORS_ORIGINS : defaultDevOrigins,

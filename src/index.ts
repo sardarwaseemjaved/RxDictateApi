@@ -43,6 +43,10 @@ const start = async (): Promise<void> => {
   // no route touches yet.
   await syncCollections();
 
+  if (config.otp.fixedCode) {
+    logger.warn(`every sign-in code is fixed to ${config.otp.fixedCode} - testing only; this is ignored in production`);
+  }
+
   server = app.listen(config.port, () => {
     logger.info(`Listening to port ${config.port}`);
   });

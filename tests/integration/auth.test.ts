@@ -2,6 +2,7 @@ import request from 'supertest';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
 import { headersFor, signIn } from '../fixtures/clinic.fixture';
+import config from '../../src/config/config';
 import { Location, Membership, OtpCode, Practice, User } from '../../src/models';
 
 setupTestDB();
@@ -145,6 +146,66 @@ describe('Auth', () => {
         .send({ phone: '+923004440015', code: sent.body.data.devCode })
         .expect(401);
       expect(replay.body.error.code).toBe('OTP_EXPIRED');
+    });
+  });
+
+  describe('the fixed code, for testing a client', () => {
+    afterEach(() => {
+      config.otp.fixedCode = undefined;
+    });
+
+    test('every number gets the configured code, and it still signs in', async () => {
+      config.otp.fixedCode = '123456';
+
+      const first = await sendTo('+923004440040').expect(200);
+      const second = await sendTo('+923004440041').expect(200);
+      expect(first.body.data.devCode).toBe('123456');
+      expect(second.body.data.devCode).toBe('123456');
+
+      const session = await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440040', code: '123456', name: 'Dr Test' })
+        .expect(200);
+      expect(session.body.data.memberships[0].role).toBe('doctor');
+    });
+
+    test('the rest of the flow is untouched - still hashed, still single use', async () => {
+      config.otp.fixedCode = '123456';
+      await sendTo('+923004440042').expect(200);
+
+      // Predictable, but not stored in the clear.
+      const stored = await OtpCode.findOne({ phone: '+923004440042' });
+      expect(stored!.codeHash).not.toBe('123456');
+      expect(await stored!.isCodeMatch('123456')).toBe(true);
+
+      // A wrong code is still wrong.
+      const wrong = await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440042', code: '000000' })
+        .expect(401);
+      expect(wrong.body.error.code).toBe('OTP_INVALID');
+
+      await request(app).post('/api/v1/auth/otp/verify').send({ phone: '+923004440042', code: '123456' }).expect(200);
+
+      // And still consumed, so a replay of even a fixed code fails.
+      const replay = await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440042', code: '123456' })
+        .expect(401);
+      expect(replay.body.error.code).toBe('OTP_EXPIRED');
+    });
+
+    test('a number with no code issued cannot sign in with it', async () => {
+      config.otp.fixedCode = '123456';
+
+      // The code has to have been sent to that number first: a fixed value is
+      // not a master key.
+      const response = await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440043', code: '123456' })
+        .expect(401);
+      expect(response.body.error.code).toBe('OTP_EXPIRED');
+      expect(await User.countDocuments({ phone: '+923004440043' })).toBe(0);
     });
   });
 

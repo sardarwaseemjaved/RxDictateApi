@@ -45,7 +45,13 @@ export const sendOtp = async (phone: string): Promise<{ devCode?: string }> => {
 
   await OtpCode.deleteMany({ phone });
 
-  const code = generateCode();
+  /**
+   * Only the value is predictable when a fixed code is configured. It is still
+   * hashed, still expires, still counts wrong attempts and is still single use,
+   * so what a client exercises in testing is the real flow rather than a
+   * shortcut around it.
+   */
+  const code = config.otp.fixedCode ?? generateCode();
   await OtpCode.create({
     phone,
     // Hashed by the model's pre-save hook.

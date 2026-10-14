@@ -227,6 +227,13 @@ Phone and a one-time code. There is no password anywhere in this product.
   "resend" safe. Outside production the code comes back as `devCode`.
 - `POST /auth/otp/verify` consumes it. A wrong guess is counted; too many burn the
   code. The code is single use.
+- `OTP_FIXED_CODE=123456` makes every sign-in use that code, so a client can be
+  tested without an SMS gateway. Only the value changes: it is still hashed, still
+  expires, still counts attempts, is still single use, and still has to have been
+  sent to that number first — it is not a master key. It is forced off in
+  production, because with it set anybody who knows a phone number can sign in as
+  its owner. [tests/unit/config/config.test.ts](tests/unit/config/config.test.ts)
+  holds that guard down.
 - A phone number that verifies is a person, so there is no separate sign-up. A
   user with **no memberships at all** gets a practice, one location called "My
   clinic", and a doctor membership. A PA already has a membership before she first
