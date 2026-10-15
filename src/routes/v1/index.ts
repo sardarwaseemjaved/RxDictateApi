@@ -18,6 +18,7 @@ import reportRoute from './report.route';
 import appointmentRoute from './appointment.route';
 import followUpRoute from './followUp.route';
 import portalRoute from './portal.route';
+import fileRoute, { servesLocalFiles } from './file.route';
 import docsRoute from './docs.route';
 
 const router = express.Router();
@@ -57,6 +58,14 @@ const routes = [
 routes.forEach((route) => {
   router.use(route.path, route.route);
 });
+
+/**
+ * Downloads for the local storage driver. Not mounted at all with S3 or R2,
+ * where the bucket serves its own presigned URLs.
+ */
+if (servesLocalFiles()) {
+  router.use('/files', fileRoute);
+}
 
 /* istanbul ignore next */
 if (config.env === 'development') {

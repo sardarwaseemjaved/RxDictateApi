@@ -41,6 +41,7 @@ const letterheadHtml = (snapshot: LetterheadSnapshot, bilingual: boolean): strin
       <div class="doctor">
         <h1>${escape(snapshot.doctorName)}</h1>
         <p class="quals">${escape(snapshot.qualifications.join(', '))}</p>
+        ${snapshot.speciality ? `<p class="speciality">${escape(snapshot.speciality)}</p>` : ''}
         ${snapshot.pmdcNo ? `<p class="pmdc">PMDC ${escape(snapshot.pmdcNo)}</p>` : ''}
       </div>
       <div class="clinic">
@@ -145,6 +146,7 @@ export const prescriptionHtml = (
       letterhead: { en: '', ur: '' },
       doctorName: '',
       qualifications: [],
+      speciality: '',
       pmdcNo: '',
     };
   const sections = wireSections(prescription.sections);
@@ -163,6 +165,7 @@ export const prescriptionHtml = (
       .letterhead h1 { font-size: 16pt; margin: 0; }
       .letterhead h2 { font-size: 12pt; margin: 0; }
       .letterhead p { margin: 1mm 0; font-size: 9pt; color: #444; }
+      .speciality { font-style: italic; }
       .clinic { text-align: right; }
       .clinic-ur { font-size: 12pt; }
       .patient { display: flex; gap: 8mm; margin: 5mm 0; font-size: 10pt; }

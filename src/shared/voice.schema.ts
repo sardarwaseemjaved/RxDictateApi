@@ -79,5 +79,11 @@ export type AddSegmentBody = z.infer<typeof addSegmentBodySchema>;
 export const signedUrlViewSchema = z.object({
   url: z.string(),
   expiresAt: z.coerce.date(),
+  /**
+   * What is actually at that URL. Without a PDF_RENDERER_URL configured a
+   * print file is stored as HTML, and an app that assumes application/pdf
+   * will hand WhatsApp something it cannot share.
+   */
+  contentType: z.string(),
 });
 export type SignedUrlView = z.infer<typeof signedUrlViewSchema>;

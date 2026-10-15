@@ -122,6 +122,167 @@ describe('The ops engine', () => {
     });
   });
 
+  describe('an update changes only what it was given', () => {
+    /**
+     * The bug this guards: the item schemas carry defaults, and .partial()
+     * does not stop a default firing for a key that was left out. Parsing
+     * { name } came back with every other field filled in, and merging that
+     * over the stored line reset the dose, the strength, the form and the
+     * duration - a medicine moving from night to morning because somebody
+     * confirmed its name.
+     */
+    test('confirming a medicine by name leaves every other field untouched', () => {
+      const start = run([
+        op({
+          op: 'add',
+          section: 'medicines',
+          value: {
+            name: 'Rosuvastatin',
+            strength: '10 mg',
+            form: 'cap',
+            pattern: { m: 0, a: 0, n: 1 },
+            timing: 'after_meal',
+            durationDays: 30,
+            flags: ['dose_unclear'],
+          },
+        }),
+      ]).sections;
+      const stored = start.medicines[0];
+      const { itemId } = { itemId: stored.id };
+
+      const { sections } = run([op({ op: 'update', section: 'medicines', itemId, value: { name: 'Rosuvastatin' } })], start);
+      const after = sections.medicines[0];
+
+      expect(after.strength).toBe('10 mg');
+      expect(after.form).toBe('cap');
+      expect(after.pattern).toEqual({ m: 0, a: 0, n: 1 });
+      expect(after.timing).toBe('after_meal');
+      expect(after.durationDays).toBe(30);
+      // Everything except the flags, which a typed edit clears on purpose:
+      // the doctor has now looked at the line.
+      expect({ ...after, flags: stored.flags }).toEqual(stored);
+      expect(after.flags).toEqual([]);
+    });
+
+    test('a one-field update to a medicine touches one field', () => {
+      const start = run([
+        op({
+          op: 'add',
+          section: 'medicines',
+          value: {
+            name: 'Panadol',
+            strength: '500 mg',
+            form: 'tab',
+            pattern: { m: 1, a: 0, n: 1 },
+            timing: 'after_meal',
+            durationDays: 5,
+            instructionEn: 'With water',
+            instructionUr: 'پانی کے ساتھ',
+          },
+        }),
+      ]).sections;
+      const stored = start.medicines[0];
+
+      const { sections } = run(
+        [op({ op: 'update', section: 'medicines', itemId: stored.id, value: { strength: '650 mg' } })],
+        start,
+      );
+
+      expect(sections.medicines[0]).toEqual({ ...stored, strength: '650 mg' });
+    });
+
+    test('a diagnosis keeps its code when only the text changes', () => {
+      const start = run([op({ op: 'add', section: 'diagnosis', value: { text: 'Dengue', code: 'A90' } })]).sections;
+      const stored = start.diagnosis[0];
+
+      const { sections } = run(
+        [op({ op: 'update', section: 'diagnosis', itemId: stored.id, value: { text: 'Dengue fever' } })],
+        start,
+      );
+
+      expect(sections.diagnosis[0]).toEqual({ ...stored, text: 'Dengue fever' });
+      expect(sections.diagnosis[0].code).toBe('A90');
+    });
+
+    test('a text item keeps its source spans when only the text changes', () => {
+      const start = run([
+        op({ op: 'add', section: 'complaints', value: { text: 'Bukhar' }, spanIds: ['span-1', 'span-2'] }),
+      ]).sections;
+      const stored = start.complaints[0];
+
+      const { sections } = run(
+        [op({ op: 'update', section: 'complaints', itemId: stored.id, value: { text: 'Bukhar, teen din' } })],
+        start,
+      );
+
+      expect(sections.complaints[0].sourceSpanIds).toEqual(['span-1', 'span-2']);
+      expect(sections.complaints[0].text).toBe('Bukhar, teen din');
+    });
+
+    test('setting bookByAssistant does not wipe the follow-up', () => {
+      const start = run([
+        op({
+          op: 'update',
+          section: 'followUp',
+          value: { inDays: 14, date: '2026-12-01', note: 'if the fever returns' },
+        }),
+      ]).sections;
+
+      const { sections } = run([op({ op: 'update', section: 'followUp', value: { bookByAssistant: false } })], start);
+
+      expect(sections.followUp).toEqual({
+        inDays: 14,
+        date: '2026-12-01',
+        note: 'if the fever returns',
+        bookByAssistant: false,
+      });
+    });
+
+    test('a null sent on purpose still clears the field', () => {
+      const start = run([op({ op: 'update', section: 'followUp', value: { inDays: 14, note: 'come back' } })]).sections;
+
+      const { sections } = run([op({ op: 'update', section: 'followUp', value: { inDays: null } })], start);
+
+      // Absent means "leave it"; null means "clear it", and the two must not
+      // be the same thing.
+      expect(sections.followUp.inDays).toBeNull();
+      expect(sections.followUp.note).toBe('come back');
+    });
+
+    test('an update that sends nothing usable is refused rather than silently doing nothing', () => {
+      const start = run([op({ op: 'add', section: 'advice', value: { text: 'Rest' } })]).sections;
+      const itemId = start.advice[0].id;
+
+      expect(() => run([op({ op: 'update', section: 'advice', itemId, value: {} })], start)).toThrow(
+        /nothing in that value to change/,
+      );
+      // An unknown field is stripped by the schema, so it counts as nothing.
+      expect(() => run([op({ op: 'update', section: 'advice', itemId, value: { colour: 'red' } })], start)).toThrow(
+        /nothing in that value to change/,
+      );
+    });
+
+    test('a value that is not an object is refused', () => {
+      const start = run([op({ op: 'add', section: 'advice', value: { text: 'Rest' } })]).sections;
+      const itemId = start.advice[0].id;
+
+      expect(() => run([op({ op: 'update', section: 'advice', itemId, value: 'Rest more' })], start)).toThrow(
+        /must be an object/,
+      );
+    });
+
+    test('an add still fills in the defaults', () => {
+      const { sections } = run([op({ op: 'add', section: 'medicines', value: { name: 'Panadol' } })]);
+      expect(sections.medicines[0]).toMatchObject({
+        form: 'tab',
+        route: 'oral',
+        pattern: { m: 1, a: 0, n: 0 },
+        timing: 'any',
+        durationDays: 0,
+      });
+    });
+  });
+
   describe('followUp', () => {
     test('can only be updated', () => {
       expect(() => run([op({ op: 'add', section: 'followUp', value: { inDays: 7 } })])).toThrow(/can only be updated/);

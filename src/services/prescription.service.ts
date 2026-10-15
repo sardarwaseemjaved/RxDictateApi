@@ -44,7 +44,11 @@ const prescriptions = new BaseRepository<IPrescription>(Prescription, { location
  * that the contract does not declare - a mongoose internal, the practice id -
  * is stripped before it leaves.
  */
-export const toPrescriptionView = (prescription: PrescriptionDoc): PrescriptionView =>
+export const toPrescriptionView = (
+  prescription: PrescriptionDoc,
+  /** Looked up by the caller, which can do it once for a whole page. */
+  revisionId: Types.ObjectId | null = null,
+): PrescriptionView =>
   prescriptionViewSchema.parse({
     id: String(prescription._id),
     locationId: String(prescription.locationId),
@@ -54,6 +58,7 @@ export const toPrescriptionView = (prescription: PrescriptionDoc): PrescriptionV
     number: prescription.number,
     version: prescription.version,
     previousVersionId: prescription.previousVersionId ? String(prescription.previousVersionId) : null,
+    revisionId: revisionId ? String(revisionId) : null,
     status: prescription.status,
     source: prescription.source,
     sections: wireSections(prescription.sections),
@@ -66,6 +71,28 @@ export const toPrescriptionView = (prescription: PrescriptionDoc): PrescriptionV
     createdAt: prescription.createdAt,
     updatedAt: prescription.updatedAt,
   });
+
+/**
+ * Which of these prescriptions have an open revision.
+ *
+ * One query for a whole page rather than one per row, and derived from the
+ * drafts themselves rather than stored on the prescription: a second field
+ * pointing back would be a second thing that can disagree with
+ * previousVersionId.
+ */
+const openRevisions = async (scope: Scope, ids: Types.ObjectId[]): Promise<Map<string, Types.ObjectId>> => {
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const drafts = await Prescription.find({
+    practiceId: scope.practiceId,
+    previousVersionId: { $in: ids },
+    status: 'draft',
+    deletedAt: null,
+  }).select('previousVersionId');
+
+  return new Map(drafts.map((draft) => [String(draft.previousVersionId), draft._id]));
+};
 
 /**
  * Only a draft can change.
@@ -100,13 +127,24 @@ export const listPrescriptions = async (
     sortBy: 'createdAt:desc',
   });
 
+  const revisions = await openRevisions(
+    scope,
+    result.results.map((prescription) => prescription._id),
+  );
+
   return {
-    prescriptions: result.results.map(toPrescriptionView),
+    prescriptions: result.results.map((prescription) =>
+      toPrescriptionView(prescription, revisions.get(String(prescription._id)) ?? null),
+    ),
     meta: { page: result.page, limit: result.limit, total: result.totalResults, totalPages: result.totalPages },
   };
 };
 
-export const getPrescription = async (scope: Scope, id: string) => toPrescriptionView(await getPrescriptionDoc(scope, id));
+export const getPrescription = async (scope: Scope, id: string) => {
+  const prescription = await getPrescriptionDoc(scope, id);
+  const revisions = await openRevisions(scope, [prescription._id]);
+  return toPrescriptionView(prescription, revisions.get(String(prescription._id)) ?? null);
+};
 
 /**
  * Start a prescription, or hand back the one that is already open.
@@ -287,6 +325,7 @@ const buildLetterheadSnapshot = async (prescription: PrescriptionDoc, doctorName
     letterhead: location?.letterhead ?? { en: '', ur: '' },
     doctorName,
     qualifications: practice?.qualifications ?? [],
+    speciality: practice?.speciality ?? '',
     pmdcNo: practice?.pmdcNo ?? '',
   };
 };
@@ -339,6 +378,28 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
     { $set: { status: 'closed', audioDeleteAfter: addDays(approvedAt, retentionDays) } },
   );
 
+  /**
+   * Signing version 2 is what retires version 1, and in that order on purpose.
+   * There are no transactions here, so if the second write failed the choice is
+   * between leaving two approved versions and leaving none - and two, which is
+   * visible and fixable, beats a patient holding nothing valid.
+   */
+  if (prescription.previousVersionId) {
+    const superseded = await Prescription.findOneAndUpdate(
+      { _id: prescription.previousVersionId, practiceId: scope.practiceId, status: 'approved' },
+      { $set: { status: 'superseded' } },
+    );
+    if (superseded) {
+      await writeAudit(scope, {
+        action: 'prescription.supersede',
+        entity: 'prescription',
+        entityId: superseded._id,
+        before: { status: 'approved' },
+        after: { status: 'superseded', supersededBy: String(prescription._id) },
+      });
+    }
+  }
+
   const after = toPrescriptionView(prescription);
   await writeAudit(scope, {
     action: 'prescription.approve',
@@ -359,11 +420,16 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
 };
 
 /**
- * Revising an approved prescription makes version 2 and supersedes version 1.
+ * Revising an approved prescription opens version 2 as a draft.
  *
- * Nothing about version 1 changes except its status, so what the patient was
- * handed stays exactly readable - including the letterhead it was printed with.
- * The new draft carries no number: it gets its own when it is approved.
+ * Version 1 stays approved until version 2 is signed. Superseding it straight
+ * away meant that a doctor who started a revision and was called away left the
+ * patient with no valid prescription at all: version 1 retired, version 2
+ * never approved. Nothing about version 1 changes here, so what the patient is
+ * holding stays exactly readable, letterhead included.
+ *
+ * The new draft carries no number: it gets its own when it is approved, and
+ * that is also the moment version 1 becomes superseded.
  */
 export const revisePrescription = async (scope: Scope, id: string, body: RevisePrescriptionBody) => {
   const previous = await getPrescriptionDoc(scope, id);
@@ -375,36 +441,46 @@ export const revisePrescription = async (scope: Scope, id: string, body: ReviseP
     throw new AppError('RX_NOT_APPROVED', 'Only an approved prescription needs revising; edit the draft instead.');
   }
 
-  const revision = await prescriptions.create(scope, {
-    patientId: previous.patientId,
-    visitId: previous.visitId,
-    doctorId: scope.actorId,
-    status: 'draft',
-    source: previous.source,
-    printLanguage: previous.printLanguage,
-    sections: wireSections(previous.sections),
-    version: previous.version + 1,
-    previousVersionId: previous._id,
-    number: null,
-  });
+  // One revision at a time. The index below decides it even when two taps
+  // arrive together; this is the readable answer for the ordinary case.
+  const alreadyOpen = await prescriptions.findOne(scope, { previousVersionId: previous._id, status: 'draft' });
+  if (alreadyOpen) {
+    throw new AppError('CONFLICT', 'This prescription is already being revised.', {
+      revisionId: String(alreadyOpen._id),
+    });
+  }
 
-  previous.status = 'superseded';
-  await previous.save();
+  let revision: PrescriptionDoc;
+  try {
+    revision = await prescriptions.create(scope, {
+      patientId: previous.patientId,
+      visitId: previous.visitId,
+      doctorId: scope.actorId,
+      status: 'draft',
+      source: previous.source,
+      printLanguage: previous.printLanguage,
+      sections: wireSections(previous.sections),
+      version: previous.version + 1,
+      previousVersionId: previous._id,
+      number: null,
+    });
+  } catch (error) {
+    if ((error as { code?: number }).code === 11000) {
+      const open = await prescriptions.findOne(scope, { previousVersionId: previous._id, status: 'draft' });
+      throw new AppError('CONFLICT', 'This prescription is already being revised.', {
+        ...(open ? { revisionId: String(open._id) } : {}),
+      });
+    }
+    throw error;
+  }
 
   const after = toPrescriptionView(revision);
   await writeAudit(scope, {
     action: 'prescription.revise',
     entity: 'prescription',
     entityId: revision._id,
-    before: { id: String(previous._id), version: previous.version, status: 'approved' },
+    before: { id: String(previous._id), version: previous.version, status: previous.status },
     after: { version: revision.version, reason: body.reason },
-  });
-  await writeAudit(scope, {
-    action: 'prescription.supersede',
-    entity: 'prescription',
-    entityId: previous._id,
-    before: { status: 'approved' },
-    after: { status: 'superseded', supersededBy: String(revision._id) },
   });
   emit('prescription.revised', {
     practiceId: scope.practiceId,
@@ -450,6 +526,45 @@ export const prescriptionPdf = async (scope: Scope, id: string): Promise<SignedU
 };
 
 /**
+ * Abandon a draft.
+ *
+ * The way out of a revision somebody started and thought better of: the draft
+ * becomes cancelled and the version it was revising is left approved, exactly
+ * as the patient is holding it. Also how a consultation that produced nothing
+ * is closed, which frees the one-draft-per-visit slot.
+ *
+ * Only a draft. An approved prescription is a document somebody has, and the
+ * way to withdraw it is to revise it.
+ */
+export const cancelPrescription = async (scope: Scope, id: string) => {
+  const prescription = await getPrescriptionDoc(scope, id);
+
+  if (prescription.status === 'cancelled') {
+    return toPrescriptionView(prescription);
+  }
+  if (prescription.status === 'approved') {
+    throw new AppError('RX_LOCKED', 'This prescription is approved. Revise it rather than cancelling it.');
+  }
+  if (prescription.status !== 'draft') {
+    throw new AppError('RX_NOT_DRAFT', `A ${prescription.status} prescription cannot be cancelled.`);
+  }
+
+  prescription.status = 'cancelled';
+  await prescription.save();
+
+  const after = toPrescriptionView(prescription);
+  await writeAudit(scope, {
+    action: 'prescription.cancel',
+    entity: 'prescription',
+    entityId: prescription._id,
+    before: { status: 'draft', version: prescription.version },
+    after: { status: 'cancelled', revising: prescription.previousVersionId ? String(prescription.previousVersionId) : null },
+  });
+
+  return after;
+};
+
+/**
  * What the page will look like, before it is signed.
  *
  * Deliberately separate from /pdf: that one refuses a draft, because a
@@ -489,6 +604,7 @@ export default {
   patchPrescription,
   approvePrescription,
   revisePrescription,
+  cancelPrescription,
   prescriptionPdf,
   previewPrescription,
   toPrescriptionView,

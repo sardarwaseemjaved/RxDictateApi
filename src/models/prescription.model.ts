@@ -107,6 +107,7 @@ const letterheadSnapshotSubSchema = new Schema<LetterheadSnapshot>(
     letterhead: { type: bilingualSubSchema, default: () => ({ en: '', ur: '' }) },
     doctorName: { type: String, default: '' },
     qualifications: { type: [String], default: [] },
+    speciality: { type: String, default: '' },
     pmdcNo: { type: String, default: '' },
   },
   { _id: false },
@@ -194,6 +195,15 @@ prescriptionSchema.index({ practiceId: 1, locationId: 1, status: 1, createdAt: -
  * several prescriptions written outside a visit all carry null and must not
  * collide on it.
  */
+/**
+ * One open revision per prescription, for the same reason as one draft per
+ * visit: two taps must not start two revisions of the same page.
+ */
+prescriptionSchema.index(
+  { practiceId: 1, previousVersionId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: 'draft', previousVersionId: { $type: 'objectId' } } },
+);
+
 prescriptionSchema.index(
   { practiceId: 1, visitId: 1, status: 1 },
   { unique: true, partialFilterExpression: { status: 'draft', visitId: { $type: 'objectId' } } },

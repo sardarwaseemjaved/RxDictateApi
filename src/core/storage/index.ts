@@ -1,11 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl as presign } from '@aws-sdk/s3-request-presigner';
 import type { Types } from 'mongoose';
 import config from '../../config/config';
 import logger from '../../config/logger';
 import { AppError } from '../errors';
+import type { SignedUrlView } from '../../shared/voice.schema';
 
 /**
  * Private file storage for dictation audio and prescription PDFs.
@@ -81,6 +83,32 @@ export const reportPageKey = (practiceId: Types.ObjectId | string, pageId: strin
 export const reportExtensionFor = (contentType: string): string =>
   ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' })[contentType] ?? 'bin';
 
+/**
+ * What is actually stored under a key, worked out from its extension.
+ *
+ * The one place that decides, so the Content-Type a local download is served
+ * with and the contentType the app is told about cannot disagree - and so an
+ * app that is about to share a file on WhatsApp can find out whether it has a
+ * PDF or an HTML page before it tries.
+ */
+export const contentTypeFor = (key: string): string => {
+  const extension = key.split('.').pop()?.toLowerCase() ?? '';
+  return (
+    {
+      pdf: 'application/pdf',
+      html: 'text/html; charset=utf-8',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      m4a: 'audio/mp4',
+      aac: 'audio/aac',
+      wav: 'audio/wav',
+      webm: 'audio/webm',
+      mp3: 'audio/mpeg',
+    }[extension] ?? 'application/octet-stream'
+  );
+};
+
 /** The file extension for an upload's content type. */
 export const extensionFor = (contentType: string): string =>
   ({
@@ -91,6 +119,60 @@ export const extensionFor = (contentType: string): string =>
     'audio/webm': 'webm',
     'audio/mpeg': 'mp3',
   })[contentType] ?? 'bin';
+
+/* ------------------------------------------------------------------ *
+ * Signing a local download
+ * ------------------------------------------------------------------ */
+
+/** Where the local driver's download route is mounted. */
+export const LOCAL_FILES_PATH = '/api/v1/files';
+
+/**
+ * S3 presigns its own URLs. The local driver has to do the same job itself, or
+ * a dev box hands the app a path on the server's disk that a phone cannot
+ * open.
+ *
+ * Keyed on the JWT secret, which is already the thing this server's word is
+ * worth: a link is good for the key and the expiry it was signed with, and for
+ * nothing else. It carries no session, so the app can hand it to a WebView, an
+ * image tag or a share sheet without passing a bearer token around.
+ */
+const signatureFor = (key: string, expires: number): string =>
+  createHmac('sha256', config.jwt.secret).update(`${key}:${expires}`).digest('hex');
+
+export interface LocalDownloadRequest {
+  key: string;
+  expires: string | undefined;
+  signature: string | undefined;
+}
+
+/**
+ * Check a local download link. Returns the content type to serve it with, or
+ * throws - an expired link and a tampered one are both refused, and
+ * deliberately with the same answer, because telling them apart tells a
+ * guesser which half to keep trying.
+ */
+export const verifyLocalDownload = ({ key, expires, signature }: LocalDownloadRequest): { contentType: string } => {
+  const refused = new AppError('FORBIDDEN', 'That link is not valid any more.');
+
+  const expiresAt = Number(expires);
+  if (!expires || !Number.isFinite(expiresAt) || !signature) {
+    throw refused;
+  }
+  if (expiresAt * 1000 < Date.now()) {
+    throw refused;
+  }
+
+  const expected = signatureFor(key, expiresAt);
+  // Constant time, so the comparison itself does not leak the signature.
+  const given = Buffer.from(signature, 'utf8');
+  const wanted = Buffer.from(expected, 'utf8');
+  if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+    throw refused;
+  }
+
+  return { contentType: contentTypeFor(key) };
+};
 
 /* ------------------------------------------------------------------ *
  * Drivers
@@ -168,8 +250,13 @@ const localDriver = (): StorageDriver => {
       // eslint-disable-next-line security/detect-non-literal-fs-filename
       return fs.readFile(resolveKey(key));
     },
-    async signedGetUrl(key) {
-      return `file://${resolveKey(key)}`;
+    async signedGetUrl(key, expiresInSeconds) {
+      // Prove the file is there before handing out a link to it, so a missing
+      // object is a 404 now rather than a broken link later.
+      resolveKey(key);
+      const expires = Math.floor((Date.now() + expiresInSeconds * 1000) / 1000);
+      const query = new URLSearchParams({ expires: String(expires), sig: signatureFor(key, expires) });
+      return `${config.publicApiUrl}${LOCAL_FILES_PATH}/${key}?${query.toString()}`;
     },
     async remove(key) {
       await fs.rm(resolveKey(key), { force: true });
@@ -222,9 +309,10 @@ export const supportsUploads = (): boolean => driver().signedPutUrl !== undefine
 export const signedGetUrl = async (
   key: string,
   expiresInSeconds: number = config.storage.signedUrlTtlSeconds,
-): Promise<{ url: string; expiresAt: Date }> => ({
+): Promise<SignedUrlView> => ({
   url: await driver().signedGetUrl(key, expiresInSeconds),
   expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+  contentType: contentTypeFor(key),
 });
 
 /** Used by the audio retention sweep. A key that is already gone is not an error. */
@@ -242,6 +330,8 @@ export default {
   get,
   signedGetUrl,
   signedPutUrl,
+  verifyLocalDownload,
+  contentTypeFor,
   supportsUploads,
   remove,
   audioKey,

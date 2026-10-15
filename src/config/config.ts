@@ -1,4 +1,5 @@
 import path from 'path';
+import { networkInterfaces } from 'os';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
@@ -59,6 +60,12 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
   OTP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(5),
 
+  /**
+   * The address this API is reachable at from outside, used to build download
+   * links for the local storage driver. Unset, it is guessed from this
+   * machine's LAN address, because a phone cannot open localhost.
+   */
+  PUBLIC_API_URL: z.string().url().optional(),
   STORAGE_DRIVER: z.enum(['s3', 'local']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('.storage'),
   S3_BUCKET: z.string().optional(),
@@ -107,6 +114,19 @@ if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
 
 const defaultDevOrigins = ['http://localhost:3000', 'http://localhost:8081', 'http://localhost:19006'];
 
+/**
+ * The first non-internal IPv4 address of this machine.
+ *
+ * A link to localhost is useless on a phone and useless in the Android
+ * emulator, and both can reach the host's LAN address, so that is the sensible
+ * guess when nobody has said. PUBLIC_API_URL overrides it, which is what a
+ * deployment should set.
+ */
+const lanAddress = (): string | undefined =>
+  Object.values(networkInterfaces())
+    .flatMap((addresses) => addresses ?? [])
+    .find((address) => address.family === 'IPv4' && !address.internal)?.address;
+
 const config = {
   env: env.NODE_ENV,
   isProduction: env.NODE_ENV === 'production',
@@ -153,6 +173,8 @@ const config = {
     authMax: env.AUTH_RATE_LIMIT_MAX,
     otpMax: env.OTP_RATE_LIMIT_MAX,
   },
+  /** Where a download link should point. */
+  publicApiUrl: env.PUBLIC_API_URL ?? `http://${lanAddress() ?? 'localhost'}:${env.PORT}`,
   storage: {
     driver: env.STORAGE_DRIVER,
     localDir: env.STORAGE_LOCAL_DIR,

@@ -68,36 +68,37 @@ Copy `.env.example`. Everything is validated by zod at boot in
 [src/config/config.ts](src/config/config.ts), which fails fast rather than
 letting a missing variable become a runtime surprise. The full set:
 
-| Variable                                    | Default        | Notes                                                      |
-| ------------------------------------------- | -------------- | ---------------------------------------------------------- |
-| `PORT`                                      | `3000`         |                                                            |
-| `MONGODB_URL`                               | —              | required; `-test` is appended when `NODE_ENV=test`         |
-| `JWT_SECRET`                                | —              | required, at least 16 characters                           |
-| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`           |                                                            |
-| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`           |                                                            |
-| `OTP_EXPIRATION_MINUTES`                    | `10`           |                                                            |
-| `OTP_MAX_ATTEMPTS`                          | `5`            | wrong guesses before the code is burned                    |
-| `OTP_COOLDOWN_SECONDS`                      | `60`           | per phone number, survives a restart                       |
-| `OTP_LOG_IN_DEV`                            | `true`         | outside production, return the code as `devCode`           |
-| `CORS_ORIGINS`                              | dev localhosts | comma separated; **required in production**                |
-| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`           |                                                            |
-| `RATE_LIMIT_MAX`                            | `300`          | the whole API                                              |
-| `AUTH_RATE_LIMIT_MAX`                       | `20`           | sign-in                                                    |
-| `OTP_RATE_LIMIT_MAX`                        | `5`            | keyed on the phone number, not the IP                      |
-| `STORAGE_DRIVER`                            | `local`        | `local` or `s3`                                            |
-| `STORAGE_LOCAL_DIR`                         | `.storage`     | for the `local` driver                                     |
-| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —              | any S3 or R2 bucket                                        |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —              |                                                            |
-| `S3_FORCE_PATH_STYLE`                       | `true`         | needed by R2 and MinIO                                     |
-| `SIGNED_URL_TTL_SECONDS`                    | `300`          | audio and PDF links                                        |
-| `MAX_AUDIO_UPLOAD_MB`                       | `20`           | per dictation segment                                      |
-| `SMS_PROVIDER`                              | `log`          | sign-in codes and "you were added"                         |
-| `SMS_SENDER_ID`                             | `Clinic`       |                                                            |
-| `STT_PROVIDER`                              | `none`         | `none` or `mock`; see **Voice** below                      |
-| `LLM_PROVIDER`                              | `none`         | `none` or `mock`                                           |
-| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`        | a stalled segment is failed, not left hanging              |
-| `PDF_RENDERER_URL`                          | —              | an HTML-to-PDF service; without one the print file is HTML |
-| `AUDIO_RETENTION_DAYS`                      | `30`           | default for a new practice, days after approval            |
+| Variable                                    | Default                    | Notes                                                      |
+| ------------------------------------------- | -------------------------- | ---------------------------------------------------------- |
+| `PORT`                                      | `3000`                     |                                                            |
+| `MONGODB_URL`                               | —                          | required; `-test` is appended when `NODE_ENV=test`         |
+| `JWT_SECRET`                                | —                          | required, at least 16 characters                           |
+| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`                       |                                                            |
+| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`                       |                                                            |
+| `OTP_EXPIRATION_MINUTES`                    | `10`                       |                                                            |
+| `OTP_MAX_ATTEMPTS`                          | `5`                        | wrong guesses before the code is burned                    |
+| `OTP_COOLDOWN_SECONDS`                      | `60`                       | per phone number, survives a restart                       |
+| `OTP_LOG_IN_DEV`                            | `true`                     | outside production, return the code as `devCode`           |
+| `CORS_ORIGINS`                              | dev localhosts             | comma separated; **required in production**                |
+| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                       |                                                            |
+| `RATE_LIMIT_MAX`                            | `300`                      | the whole API                                              |
+| `AUTH_RATE_LIMIT_MAX`                       | `20`                       | sign-in                                                    |
+| `OTP_RATE_LIMIT_MAX`                        | `5`                        | keyed on the phone number, not the IP                      |
+| `PUBLIC_API_URL`                            | this machine's LAN address | where download links point; set it behind a proxy          |
+| `STORAGE_DRIVER`                            | `local`                    | `local` or `s3`                                            |
+| `STORAGE_LOCAL_DIR`                         | `.storage`                 | for the `local` driver                                     |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —                          | any S3 or R2 bucket                                        |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —                          |                                                            |
+| `S3_FORCE_PATH_STYLE`                       | `true`                     | needed by R2 and MinIO                                     |
+| `SIGNED_URL_TTL_SECONDS`                    | `300`                      | audio and PDF links                                        |
+| `MAX_AUDIO_UPLOAD_MB`                       | `20`                       | per dictation segment                                      |
+| `SMS_PROVIDER`                              | `log`                      | sign-in codes and "you were added"                         |
+| `SMS_SENDER_ID`                             | `Clinic`                   |                                                            |
+| `STT_PROVIDER`                              | `none`                     | `none` or `mock`; see **Voice** below                      |
+| `LLM_PROVIDER`                              | `none`                     | `none` or `mock`                                           |
+| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`                    | a stalled segment is failed, not left hanging              |
+| `PDF_RENDERER_URL`                          | —                          | an HTML-to-PDF service; without one the print file is HTML |
+| `AUDIO_RETENTION_DAYS`                      | `30`                       | default for a new practice, days after approval            |
 
 ## Layout
 
@@ -337,6 +338,12 @@ A draft is edited only through **ops**:
 `followUp`, which only updates. An `add` never carries an id — the server mints one.
 An `update` or `remove` addresses an existing `itemId`.
 
+An `update` op changes only the fields it carries. The item schemas have
+defaults, and `.partial()` does not stop a default firing for a key that was
+left out, so the parsed value is narrowed back to the keys that were actually
+sent — otherwise confirming a medicine by name would reset its dose, strength,
+form and duration. An `add` still fills the defaults in.
+
 The whole batch is validated before any of it is applied
 ([prescriptionOps.service.ts](src/services/prescriptionOps.service.ts)). Two
 reasons: a bad op halfway through would otherwise leave a prescription half
@@ -355,14 +362,26 @@ overwritten.
 **Approval** mints the number with one atomic `$inc` on the practice counter —
 never read-then-write, which is how two prescriptions end up with the same number
 on a legal document — freezes the letterhead, and locks the document. **Revising**
-creates version 2 and marks version 1 `superseded`, so what the patient was handed
-stays exactly as it was printed.
+opens version 2 as a draft and leaves version 1 **approved** until version 2 is
+signed — so a doctor who starts a revision and is called away has not left the
+patient without a valid prescription. Signing version 2 is what retires version
+1, and in that order on purpose: there are no transactions here, and two
+approved versions is a state somebody can see and fix, where none is not.
+`GET /prescriptions/:id` carries `revisionId` while one is open, a second
+revise answers `CONFLICT` with that id, and a unique partial index decides it
+when two taps arrive together. Nothing about version 1 ever changes but its
+status, so what the patient was handed stays exactly as it was printed.
 
 Approval is refused with `RX_HAS_FLAGS` while any medicine still carries one. A
 flag is the pipeline saying it was not sure — an unclear dose, a drug it could
 not place — and signing is the doctor's name on a legal document, so every
 uncertain line has to have been looked at. The app greys the button out; this is
 the part that cannot be got around. `details.itemIds` says which lines.
+
+**Abandoning one.** `POST /prescriptions/:id/cancel` marks a draft
+`cancelled`, which frees the one-draft-per-visit slot and is the way out of a
+revision somebody thought better of. Only a draft: an approved prescription is
+a document somebody is holding, and the way to withdraw it is to revise it.
 
 **Preview** (`GET /prescriptions/:id/preview`) renders a draft through the same
 template the printer uses, so what the doctor checks is what prints. It is marked
@@ -438,7 +457,13 @@ does not.
 - **Naming**: collections plural camelCase, events `entity.pastTense`, permissions
   `entity.verb`.
 - **Private files**: audio and PDFs in private object storage only, served by short
-  signed URLs. No patient names in logs or in object keys. The application log
+  signed URLs. With S3 or R2 the bucket presigns them. With the local driver the
+  API signs and serves them itself at `GET /api/v1/files/<key>?expires=&sig=`,
+  HMAC'd with the JWT secret — a `file://` path is no use to a phone. That route
+  carries no session on purpose: the link is the credential, so the app can hand
+  it to a WebView, an image tag or a share sheet. Every signed URL says its
+  `contentType`, because without a renderer configured a print file is HTML and
+  an app that assumes PDF will offer to share something it cannot. No patient names in logs or in object keys. The application log
   carries ids and masked phone numbers; the before/after of a record belongs in the
   audit log.
 
@@ -487,3 +512,7 @@ The suites that exist to hold the six rules down:
 | [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                     |
 | [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                           |
 | [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                  |
+| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                               |
+| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads: a good link serves the file, a tampered or expired one is refused                                                                          |
+| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                           |
+| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                     |

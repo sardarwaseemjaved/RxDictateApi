@@ -120,12 +120,9 @@ export const listReports = async (
 export const getReport = async (scope: Scope, id: string): Promise<ReportDetailView> => {
   const report = await reports.findByIdOrFail(scope, id, 'Report');
 
-  const pageUrls = await Promise.all(
-    report.pageKeys.map(async (key) => {
-      const signed = await signedGetUrl(key);
-      return { url: signed.url, expiresAt: signed.expiresAt };
-    }),
-  );
+  // Each page carries its own content type: a report can be a photographed
+  // page and a PDF in the same record.
+  const pageUrls = await Promise.all(report.pageKeys.map((key) => signedGetUrl(key)));
 
   return { ...toReportView(report), pageUrls };
 };

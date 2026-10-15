@@ -51,12 +51,8 @@ const invalid = (index: number, op: Op, message: string, details?: unknown): App
     ...(details ? { issues: details } : {}),
   });
 
-const parseValue = (index: number, op: Op, schema: z.ZodObject, partial: boolean): Record<string, unknown> => {
-  if (op.value === undefined || op.value === null) {
-    throw invalid(index, op, 'a value is required');
-  }
-  const effective = partial ? schema.partial() : schema;
-  const result = effective.safeParse(op.value);
+const parsed = (index: number, op: Op, schema: z.ZodType): Record<string, unknown> => {
+  const result = schema.safeParse(op.value);
   if (!result.success) {
     throw invalid(
       index,
@@ -66,6 +62,53 @@ const parseValue = (index: number, op: Op, schema: z.ZodObject, partial: boolean
     );
   }
   return result.data as Record<string, unknown>;
+};
+
+/** A whole new item: the section's defaults fill in whatever was not said. */
+const parseNewValue = (index: number, op: Op, schema: z.ZodObject): Record<string, unknown> => {
+  if (op.value === undefined || op.value === null) {
+    throw invalid(index, op, 'a value is required');
+  }
+  return parsed(index, op, schema);
+};
+
+/**
+ * A change to an item that already exists: only the fields that were sent.
+ *
+ * The item schemas carry defaults, and `.partial()` does not stop a default
+ * firing for a key that was left out - so parsing `{ name: 'Rosuvastatin' }`
+ * returns every other field filled with its default, and merging that over the
+ * stored line silently resets the dose, the strength, the form and the
+ * duration. On a prescription that means a medicine quietly moving from night
+ * to morning because somebody confirmed the name.
+ *
+ * So the parsed value is narrowed back to the keys the caller actually sent.
+ * Defaults become irrelevant rather than merely absent, which also covers
+ * anything else zod might add, and an unknown key is dropped by the schema and
+ * therefore never reaches the patch.
+ */
+const parseUpdateValue = (index: number, op: Op, schema: z.ZodObject): Record<string, unknown> => {
+  if (op.value === undefined || op.value === null) {
+    throw invalid(index, op, 'a value is required');
+  }
+  if (typeof op.value !== 'object' || Array.isArray(op.value)) {
+    throw invalid(index, op, 'a value must be an object');
+  }
+
+  const sent = op.value as Record<string, unknown>;
+  const result = parsed(index, op, schema.partial());
+
+  const patch: Record<string, unknown> = {};
+  Object.keys(sent).forEach((key) => {
+    if (key in result) {
+      patch[key] = result[key];
+    }
+  });
+
+  if (Object.keys(patch).length === 0) {
+    throw invalid(index, op, 'there is nothing in that value to change');
+  }
+  return patch;
 };
 
 /**
@@ -98,7 +141,7 @@ export const validateOps = (current: PrescriptionSections, ops: Op[]): Normalize
       return {
         op,
         section,
-        value: parseValue(index, op, schema, true),
+        value: parseUpdateValue(index, op, schema),
         before: current.followUp,
       };
     }
@@ -109,7 +152,7 @@ export const validateOps = (current: PrescriptionSections, ops: Op[]): Normalize
       if (op.itemId) {
         throw invalid(index, op, 'an itemId cannot be given when adding; the server mints one');
       }
-      const value = parseValue(index, op, schema, false);
+      const value = parseNewValue(index, op, schema);
       return { op, section, value, before: null };
     }
 
@@ -133,7 +176,7 @@ export const validateOps = (current: PrescriptionSections, ops: Op[]): Normalize
     return {
       op,
       section,
-      value: parseValue(index, op, schema, true),
+      value: parseUpdateValue(index, op, schema),
       before: current[section].find((item) => item.id === op.itemId) ?? null,
     };
   });

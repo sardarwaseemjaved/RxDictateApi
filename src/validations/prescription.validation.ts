@@ -14,3 +14,4 @@ export const approvePrescription = { params: idParamSchema };
 export const revisePrescription = { params: idParamSchema, body: revisePrescriptionBodySchema };
 export const prescriptionPdf = { params: idParamSchema };
 export const previewPrescription = { params: idParamSchema };
+export const cancelPrescription = { params: idParamSchema };

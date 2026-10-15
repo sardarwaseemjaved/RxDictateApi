@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { dateStringSchema, objectIdSchema } from './common';
+import { signedUrlViewSchema } from './voice.schema';
 
 export const reportTypeSchema = z.enum(['lab', 'imaging', 'old_prescription', 'other']);
 export type ReportType = z.infer<typeof reportTypeSchema>;
@@ -69,7 +70,7 @@ export type ReportView = z.infer<typeof reportViewSchema>;
 
 /** Reading one back: the same thing, with a short-lived link per page. */
 export const reportDetailViewSchema = reportViewSchema.extend({
-  pageUrls: z.array(z.object({ url: z.string(), expiresAt: z.coerce.date() })),
+  pageUrls: z.array(signedUrlViewSchema),
 });
 export type ReportDetailView = z.infer<typeof reportDetailViewSchema>;
 

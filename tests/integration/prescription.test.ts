@@ -1,5 +1,4 @@
 import request from 'supertest';
-import fs from 'fs';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
 import { aClinic, aDraft, aPa, headersFor } from '../fixtures/clinic.fixture';
@@ -7,12 +6,23 @@ import { AuditLog, Prescription } from '../../src/models';
 import { doseInstruction } from '../../src/shared/dose';
 
 /**
- * The suite runs the local storage driver, whose signed URL is the path to the
- * file, so a test can read the page that was rendered and check what is on it.
+ * Follow a signed URL the API handed out, the way the app would.
+ *
+ * The local storage driver serves its files over HTTP through the API itself,
+ * so this goes through the real route - signature check included - rather than
+ * reading the file off disk behind its back.
  */
-const readPreview = (url: string): string =>
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  fs.readFileSync(url.replace('file://', ''), 'utf8');
+const fetchSigned = async (url: string) => {
+  const parsed = new URL(url);
+  const response = await request(app).get(`${parsed.pathname}${parsed.search}`);
+  return { status: response.status, body: response.text ?? '', contentType: response.headers['content-type'] ?? '' };
+};
+
+const readPreview = async (url: string): Promise<string> => {
+  const { status, body } = await fetchSigned(url);
+  expect(status).toBe(200);
+  return body;
+};
 
 setupTestDB();
 
@@ -210,7 +220,12 @@ describe('Prescriptions', () => {
 
   describe('revision', () => {
     /** Rule 3, end to end. */
-    test('a revise makes version 2 and marks version 1 superseded', async () => {
+    /**
+     * Version 1 stays valid while version 2 is being written. Retiring it the
+     * moment a revision opened meant a doctor who was called away left the
+     * patient with no valid prescription at all.
+     */
+    test('a revise opens version 2 and leaves version 1 approved', async () => {
       const { doctor, patientId } = await aClinic('+923002220008');
       const headers = headersFor(doctor, { location: true });
 
@@ -233,33 +248,107 @@ describe('Prescriptions', () => {
       // The sections are carried over so the doctor edits rather than retypes.
       expect(revision.body.data.sections.medicines).toHaveLength(1);
 
+      // What the patient is holding is still valid, and says so.
       const previous = await request(app).get(`/api/v1/prescriptions/${first.id}`).set(headers).expect(200);
-      expect(previous.body.data.status).toBe('superseded');
+      expect(previous.body.data.status).toBe('approved');
       expect(previous.body.data.number).toBe(firstNumber);
       expect(previous.body.data.version).toBe(1);
+      expect(previous.body.data.revisionId).toBe(revision.body.data.id);
 
-      // Version 2 is a draft, so it edits; version 1 does not, in either direction.
-      await request(app)
-        .patch(`/api/v1/prescriptions/${revision.body.data.id}`)
-        .set(headers)
-        .send(addComplaint('Still unwell'))
-        .expect(200);
-
+      // It still cannot be edited, and cannot be revised a second time.
       const edit = await request(app)
         .patch(`/api/v1/prescriptions/${first.id}`)
         .set(headers)
         .send(addComplaint('no'))
         .expect(409);
-      expect(edit.body.error.code).toBe('RX_NOT_DRAFT');
+      expect(edit.body.error.code).toBe('RX_LOCKED');
 
       const again = await request(app).post(`/api/v1/prescriptions/${first.id}/revise`).set(headers).send({}).expect(409);
-      expect(again.body.error.code).toBe('RX_ALREADY_SUPERSEDED');
+      expect(again.body.error.code).toBe('CONFLICT');
+      expect(again.body.error.details.revisionId).toBe(revision.body.data.id);
 
+      // Signing version 2 is what retires version 1.
+      await request(app)
+        .patch(`/api/v1/prescriptions/${revision.body.data.id}`)
+        .set(headers)
+        .send(addComplaint('Still unwell'))
+        .expect(200);
       const approvedSecond = await request(app)
         .post(`/api/v1/prescriptions/${revision.body.data.id}/approve`)
         .set(headers)
         .expect(200);
       expect(approvedSecond.body.data.number).not.toBe(firstNumber);
+
+      const retired = await request(app).get(`/api/v1/prescriptions/${first.id}`).set(headers).expect(200);
+      expect(retired.body.data.status).toBe('superseded');
+      expect(retired.body.data.number).toBe(firstNumber);
+
+      // And now it can be neither edited nor revised again.
+      const stale = await request(app).post(`/api/v1/prescriptions/${first.id}/revise`).set(headers).send({}).expect(409);
+      expect(stale.body.error.code).toBe('RX_ALREADY_SUPERSEDED');
+    });
+
+    test('two revise taps at once open one revision', async () => {
+      const { doctor, patientId } = await aClinic('+923002220060');
+      const headers = headersFor(doctor, { location: true });
+      const first = await aDraft(doctor, patientId);
+      await request(app).patch(`/api/v1/prescriptions/${first.id}`).set(headers).send(addMedicine('Flagyl')).expect(200);
+      await request(app).post(`/api/v1/prescriptions/${first.id}/approve`).set(headers).expect(200);
+
+      const [a, b] = await Promise.all([
+        request(app).post(`/api/v1/prescriptions/${first.id}/revise`).set(headers).send({}),
+        request(app).post(`/api/v1/prescriptions/${first.id}/revise`).set(headers).send({}),
+      ]);
+
+      expect([a.status, b.status].sort()).toEqual([201, 409]);
+      expect(await Prescription.countDocuments({ previousVersionId: first.id })).toBe(1);
+    });
+
+    test('abandoning a revision leaves version 1 exactly as the patient has it', async () => {
+      const { doctor, patientId } = await aClinic('+923002220061');
+      const headers = headersFor(doctor, { location: true });
+      const first = await aDraft(doctor, patientId);
+      await request(app).patch(`/api/v1/prescriptions/${first.id}`).set(headers).send(addMedicine('Flagyl')).expect(200);
+      const approved = await request(app).post(`/api/v1/prescriptions/${first.id}/approve`).set(headers).expect(200);
+
+      const revision = await request(app).post(`/api/v1/prescriptions/${first.id}/revise`).set(headers).send({}).expect(201);
+      const cancelled = await request(app)
+        .post(`/api/v1/prescriptions/${revision.body.data.id}/cancel`)
+        .set(headers)
+        .expect(200);
+      expect(cancelled.body.data.status).toBe('cancelled');
+
+      const previous = await request(app).get(`/api/v1/prescriptions/${first.id}`).set(headers).expect(200);
+      expect(previous.body.data.status).toBe('approved');
+      expect(previous.body.data.number).toBe(approved.body.data.number);
+      // No revision is open any more, so the doctor can start another.
+      expect(previous.body.data.revisionId).toBeNull();
+
+      await request(app).post(`/api/v1/prescriptions/${first.id}/revise`).set(headers).send({}).expect(201);
+    });
+
+    test('an approved prescription cannot be cancelled, only revised', async () => {
+      const { doctor, patientId } = await aClinic('+923002220062');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId);
+      await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Flagyl')).expect(200);
+      await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(200);
+
+      const response = await request(app).post(`/api/v1/prescriptions/${draft.id}/cancel`).set(headers).expect(409);
+      expect(response.body.error.code).toBe('RX_LOCKED');
+    });
+
+    test('cancelling a draft frees the visit for another', async () => {
+      const { doctor, patientId } = await aClinic('+923002220063');
+      const headers = headersFor(doctor, { location: true });
+      const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+      const visitId = visit.body.data.id;
+
+      const first = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }).expect(201);
+      await request(app).post(`/api/v1/prescriptions/${first.body.data.id}/cancel`).set(headers).expect(200);
+
+      const second = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId, visitId }).expect(201);
+      expect(second.body.data.id).not.toBe(first.body.data.id);
     });
 
     test('a draft cannot be revised; it is edited', async () => {
@@ -522,7 +611,7 @@ describe('Prescriptions', () => {
       expect(preview.body.data.url).toBeTruthy();
       expect(new Date(preview.body.data.expiresAt).getTime()).toBeGreaterThan(Date.now());
 
-      const page = readPreview(preview.body.data.url);
+      const page = await readPreview(preview.body.data.url);
       expect(page).toContain('DRAFT');
       expect(page).toContain('NOT VALID');
       // The letterhead is read live, because there is no frozen one yet.
@@ -545,7 +634,7 @@ describe('Prescriptions', () => {
       const approved = await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(200);
 
       const preview = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
-      const page = readPreview(preview.body.data.url);
+      const page = await readPreview(preview.body.data.url);
 
       expect(page).not.toContain('NOT VALID');
       expect(page).toContain(approved.body.data.number);
@@ -571,7 +660,7 @@ describe('Prescriptions', () => {
         .expect(200);
 
       const preview = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
-      const page = readPreview(preview.body.data.url);
+      const page = await readPreview(preview.body.data.url);
 
       expect(page).toContain(doseInstruction({ form: 'tab', pattern: { m: 1, a: 0, n: 1 }, timing: 'after_meal' }, 'ur'));
       expect(page).toContain('1 tablet in the morning and at night, after meal');
@@ -584,13 +673,13 @@ describe('Prescriptions', () => {
       await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Panadol')).expect(200);
 
       const before = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
-      expect(readPreview(before.body.data.url)).toContain('Panadol');
+      expect(await readPreview(before.body.data.url)).toContain('Panadol');
 
       await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Brufen')).expect(200);
       const after = await request(app).get(`/api/v1/prescriptions/${draft.id}/preview`).set(headers).expect(200);
 
       expect(after.body.data.url).not.toBe(before.body.data.url);
-      expect(readPreview(after.body.data.url)).toContain('Brufen');
+      expect(await readPreview(after.body.data.url)).toContain('Brufen');
     });
 
     test('a PA may look but still may not approve', async () => {
@@ -621,7 +710,14 @@ describe('Prescriptions', () => {
 
       await request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Zithromax')).expect(200);
       await request(app).post(`/api/v1/prescriptions/${draft.id}/approve`).set(headers).expect(200);
-      await request(app).post(`/api/v1/prescriptions/${draft.id}/revise`).set(headers).send({}).expect(201);
+      const revision = await request(app).post(`/api/v1/prescriptions/${draft.id}/revise`).set(headers).send({}).expect(201);
+      // Superseding is recorded when version 2 is signed, not when it opens.
+      await request(app)
+        .patch(`/api/v1/prescriptions/${revision.body.data.id}`)
+        .set(headers)
+        .send(addMedicine('Flagyl'))
+        .expect(200);
+      await request(app).post(`/api/v1/prescriptions/${revision.body.data.id}/approve`).set(headers).expect(200);
 
       const entries = await AuditLog.find({ practiceId: doctor.practiceId }).sort({ at: 1 });
       const actions = entries.map((entry) => entry.action);

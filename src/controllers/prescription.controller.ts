@@ -55,12 +55,18 @@ export const revisePrescription = catchAsync(async (req, res) => {
   );
 });
 
+export const cancelPrescription = catchAsync(async (req, res) => {
+  sendData(res, await prescriptionService.cancelPrescription(scopeFrom(req), req.params.id));
+});
+
 export const previewPrescription = catchAsync(async (req, res) => {
-  const { url, expiresAt, driver } = await prescriptionService.previewPrescription(scopeFrom(req), req.params.id);
-  sendData(res, { url, expiresAt }, { format: driver });
+  // meta.format is kept for the clients already reading it; data.contentType
+  // is the authoritative answer and says what the file actually is.
+  const { driver, ...signed } = await prescriptionService.previewPrescription(scopeFrom(req), req.params.id);
+  sendData(res, signed, { format: driver });
 });
 
 export const prescriptionPdf = catchAsync(async (req, res) => {
-  const { url, expiresAt, driver } = await prescriptionService.prescriptionPdf(scopeFrom(req), req.params.id);
-  sendData(res, { url, expiresAt }, { format: driver });
+  const { driver, ...signed } = await prescriptionService.prescriptionPdf(scopeFrom(req), req.params.id);
+  sendData(res, signed, { format: driver });
 });

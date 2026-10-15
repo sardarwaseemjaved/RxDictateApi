@@ -154,6 +154,8 @@ export const letterheadSnapshotSchema = z.object({
   letterhead: bilingualSchema.default({ en: '', ur: '' }),
   doctorName: z.string().default(''),
   qualifications: z.array(z.string()).default([]),
+  /** "Consultant Physician", printed under the qualifications. */
+  speciality: z.string().default(''),
   pmdcNo: z.string().default(''),
 });
 export type LetterheadSnapshot = z.infer<typeof letterheadSnapshotSchema>;
@@ -181,9 +183,16 @@ export type EditLogEntry = z.infer<typeof editLogEntrySchema>;
 /**
  * The item payload an op may carry, per section. `id` is absent on `add` (the
  * server mints it) and ignored on `update`, where the target comes from
- * `itemId`; everything else is optional on `update` so an op can nudge one
- * field. The unknown-key stripping of these schemas is the thing that stops an
- * LLM from inventing a field.
+ * `itemId`.
+ *
+ * On an `add` the defaults here fill in whatever was not said. On an `update`
+ * the server relaxes these and then keeps only the fields the op actually
+ * sent, so one op really can nudge a single field without resetting the rest
+ * of the line - a default firing for an absent key would otherwise move a
+ * medicine's dose because somebody confirmed its name.
+ *
+ * The unknown-key stripping of these schemas is the thing that stops an LLM
+ * from inventing a field.
  */
 export const opValueSchemas = {
   complaints: textItemSchema.omit({ id: true }),
@@ -237,6 +246,14 @@ export const prescriptionViewSchema = z.object({
   number: z.string().nullable(),
   version: z.number().int().min(1),
   previousVersionId: objectIdSchema.nullable(),
+  /**
+   * The open draft revising this one, when there is one.
+   *
+   * An approved prescription stays approved while it is being revised, so the
+   * patient is never left without a valid one - this is how the app knows a
+   * revision is in progress rather than offering to start a second.
+   */
+  revisionId: objectIdSchema.nullable(),
   status: prescriptionStatusSchema,
   source: prescriptionSourceSchema,
   sections: prescriptionSectionsSchema,

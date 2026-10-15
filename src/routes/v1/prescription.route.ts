@@ -74,7 +74,21 @@ router.post(
   prescriptionController.approvePrescription,
 );
 
-/** Makes version 2 and supersedes version 1. */
+/**
+ * Abandon a draft. The way out of a revision somebody thought better of: the
+ * version being revised is left approved and untouched.
+ */
+router.post(
+  '/:id/cancel',
+  requireAuth,
+  resolvePractice,
+  resolveLocation,
+  requireCan('prescription.update'),
+  validate(prescriptionValidation.cancelPrescription),
+  prescriptionController.cancelPrescription,
+);
+
+/** Opens version 2 as a draft. Version 1 stays approved until version 2 is signed. */
 router.post(
   '/:id/revise',
   requireAuth,
