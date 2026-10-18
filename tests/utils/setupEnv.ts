@@ -14,6 +14,7 @@ process.env.CORS_ORIGINS = process.env.CORS_ORIGINS ?? 'http://localhost:8081';
 process.env.RATE_LIMIT_MAX = process.env.RATE_LIMIT_MAX ?? '100000';
 process.env.AUTH_RATE_LIMIT_MAX = process.env.AUTH_RATE_LIMIT_MAX ?? '100000';
 process.env.OTP_RATE_LIMIT_MAX = process.env.OTP_RATE_LIMIT_MAX ?? '100000';
+process.env.LOGOUT_RATE_LIMIT_MAX = process.env.LOGOUT_RATE_LIMIT_MAX ?? '100000';
 
 process.env.STORAGE_DRIVER = process.env.STORAGE_DRIVER ?? 'local';
 process.env.STORAGE_LOCAL_DIR = process.env.STORAGE_LOCAL_DIR ?? '.storage/test';

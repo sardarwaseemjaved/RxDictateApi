@@ -5,7 +5,6 @@ import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
 import type { AddMemberBody, ListMembersQuery, MemberView, UpdateMemberBody } from '../shared/team.schema';
-import { revokeAllForUser } from './token.service';
 
 // Memberships are retired by status rather than deletedAt: a removed PA's past
 // actions stay attributable, and re-adding her reuses the row she already had.
@@ -147,9 +146,14 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
 };
 
 /**
- * Sets the membership to removed. Her sessions are revoked with it, so access
- * ends now rather than when her token expires, and everything she did stays in
- * the audit log under her name.
+ * Sets the membership to removed.
+ *
+ * Her sessions are deliberately left alone: she may work at another clinic on
+ * the same sign-in, and being taken off this one is not a reason to sign her
+ * out of that one. Membership is read on every request, so her access to this
+ * practice stops immediately anyway - resolvePractice answers
+ * MEMBERSHIP_REMOVED - and everything she did stays in the audit log under her
+ * name.
  */
 export const removeMember = async (scope: Scope, id: string): Promise<MemberView> => {
   const membership = await memberships.findByIdOrFail(scope, id, 'Member');
@@ -167,7 +171,6 @@ export const removeMember = async (scope: Scope, id: string): Promise<MemberView
   membership.status = 'removed';
   membership.removedAt = new Date();
   await membership.save();
-  await revokeAllForUser(membership.userId);
 
   const after = toMemberView(membership, user);
   await writeAudit(scope, { action: 'member.remove', entity: 'membership', entityId: membership._id, before, after });

@@ -33,7 +33,12 @@ export const errorConverter: ErrorRequestHandler = (err, req, res, next) => {
     return next(new AppError('CONFLICT', 'That record already exists'));
   }
 
-  if (err instanceof TokenExpiredError || err instanceof JsonWebTokenError) {
+  if (err instanceof TokenExpiredError) {
+    // The app's answer differs from an invalid token: refresh and retry.
+    return next(new AppError('TOKEN_EXPIRED', 'Your session needs refreshing.'));
+  }
+
+  if (err instanceof JsonWebTokenError) {
     return next(new AppError('TOKEN_INVALID', 'Please authenticate'));
   }
 

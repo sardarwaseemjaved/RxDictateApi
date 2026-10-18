@@ -24,7 +24,12 @@ export interface Headers extends Record<string, string> {
  * it decides whether a number nobody has added gets a clinic of its own.
  * Tests say which they meant through `signIn` or `signUp` below.
  */
-const verify = async (phone: string, name: string | undefined, intent: 'signIn' | 'signUp'): Promise<SignedIn> => {
+const verify = async (
+  phone: string,
+  name: string | undefined,
+  intent: 'signIn' | 'signUp',
+  device?: string,
+): Promise<SignedIn> => {
   const send = await request(app).post('/api/v1/auth/otp/send').send({ phone }).expect(200);
   const code = send.body.data.devCode as string;
   if (!code) {
@@ -33,7 +38,17 @@ const verify = async (phone: string, name: string | undefined, intent: 'signIn' 
 
   const verified = await request(app)
     .post('/api/v1/auth/otp/verify')
-    .send({ phone, code, intent, ...(name ? { name } : {}) })
+    .send({
+      phone,
+      code,
+      intent,
+      // One session per device, so each sign-in in a test gets its own unless
+      // a test deliberately reuses one.
+      deviceId: device ?? `test-device-${phone}`,
+      platform: 'ios',
+      appVersion: '1.0.0',
+      ...(name ? { name } : {}),
+    })
     .expect(200);
 
   const session = verified.body.data;
@@ -50,10 +65,12 @@ const verify = async (phone: string, name: string | undefined, intent: 'signIn' 
 };
 
 /** Sign in an existing person. No clinic is created, whoever they are. */
-export const signIn = async (phone: string, name?: string): Promise<SignedIn> => verify(phone, name, 'signIn');
+export const signIn = async (phone: string, name?: string, device?: string): Promise<SignedIn> =>
+  verify(phone, name, 'signIn', device);
 
 /** A doctor pressing "set up your clinic": a new number gets one, an old one does not. */
-export const signUp = async (phone: string, name?: string): Promise<SignedIn> => verify(phone, name, 'signUp');
+export const signUp = async (phone: string, name?: string, device?: string): Promise<SignedIn> =>
+  verify(phone, name, 'signUp', device);
 
 /** The headers every route except /auth and /me needs. */
 export const headersFor = (actor: SignedIn, options: { location?: boolean | string } = {}): Headers => {

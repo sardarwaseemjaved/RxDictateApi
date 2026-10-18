@@ -1,104 +1,102 @@
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import config from '../config/config';
-import { RefreshToken, type RefreshTokenDoc, type UserDoc } from '../models';
 import { AppError } from '../core/errors';
-import { addDays, addMinutes } from '../utils/time';
-import type { TokenPair } from '../shared/auth.schema';
+import { addMinutes } from '../utils/time';
 
-type TokenType = 'access' | 'refresh';
-
-interface Claims {
+/**
+ * Signing and checking credentials. No database: the session record that gives
+ * these meaning lives in session.service, and keeping the crypto separate is
+ * what lets that service be read without reading this one.
+ */
+interface AccessClaims {
   sub: string;
-  type: TokenType;
-  /**
-   * A nonce, because `iat` has one-second resolution: without it two tokens
-   * signed for the same user in the same second are byte-identical, and a
-   * refresh token that is supposed to be single use would be reissued
-   * unchanged.
-   */
-  jti: string;
+  sid: string;
+  type: 'access';
+}
+
+export interface AccessToken {
+  token: string;
+  expires: Date;
+}
+
+export interface VerifiedAccess {
+  userId: string;
+  sessionId: string;
 }
 
 /**
- * Unsalted, because a lookup has to find the row from the token alone. What
- * makes that safe is that the token is a signed JWT rather than a password:
- * there is nothing to guess and no dictionary to run.
+ * The access token carries who and which session, and nothing else.
+ *
+ * No role and no practice: both are resolved per request from memberships, so
+ * removing a PA takes effect on her next request rather than whenever her
+ * token happens to expire.
  */
-const hash = (token: string): string => createHash('sha256').update(token).digest('hex');
-
-const sign = (userId: string, type: TokenType, expires: Date): string =>
-  jwt.sign({ sub: userId, type, jti: randomUUID() } satisfies Claims, config.jwt.secret, {
+export const signAccessToken = (userId: string, sessionId: string): AccessToken => {
+  const expires = addMinutes(new Date(), config.jwt.accessExpirationMinutes);
+  const token = jwt.sign({ sub: userId, sid: sessionId, type: 'access' } satisfies AccessClaims, config.jwt.secret, {
     expiresIn: Math.floor((expires.getTime() - Date.now()) / 1000),
   });
+  return { token, expires };
+};
 
 /**
- * Verify an access token and return who it belongs to.
+ * Check an access token.
  *
- * The `type` claim is what stops a refresh token being presented as an access
- * token: both are signed with the same key, and only the claim tells them
- * apart.
+ * `allowExpired` is for signing out: a doctor whose token lapsed while the app
+ * was backgrounded should still be able to end the session cleanly rather than
+ * leaving a live one behind on the server. Expiry is reported separately from
+ * invalidity, because the app's answer differs - refresh and retry, against
+ * sign out.
  */
-export const verifyAccessToken = (token: string): string => {
-  const payload = jwt.verify(token, config.jwt.secret) as Partial<Claims>;
-  if (payload.type !== 'access' || !payload.sub) {
+export const verifyAccessToken = (token: string, { allowExpired = false } = {}): VerifiedAccess => {
+  let payload: Partial<AccessClaims>;
+  try {
+    payload = jwt.verify(token, config.jwt.secret, { ignoreExpiration: allowExpired }) as Partial<AccessClaims>;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TokenExpiredError') {
+      throw new AppError('TOKEN_EXPIRED', 'Your session needs refreshing.');
+    }
     throw new AppError('TOKEN_INVALID', 'Please authenticate');
   }
-  return payload.sub;
-};
 
-export const generateAuthTokens = async (user: UserDoc): Promise<TokenPair> => {
-  const accessExpires = addMinutes(new Date(), config.jwt.accessExpirationMinutes);
-  const refreshExpires = addDays(new Date(), config.jwt.refreshExpirationDays);
-
-  const access = sign(String(user._id), 'access', accessExpires);
-  const refresh = sign(String(user._id), 'refresh', refreshExpires);
-
-  await RefreshToken.create({
-    tokenHash: hash(refresh),
-    userId: user._id,
-    expires: refreshExpires,
-  });
-
-  return {
-    access: { token: access, expires: accessExpires },
-    refresh: { token: refresh, expires: refreshExpires },
-  };
+  if (payload.type !== 'access' || !payload.sub || !payload.sid) {
+    throw new AppError('TOKEN_INVALID', 'Please authenticate');
+  }
+  return { userId: payload.sub, sessionId: payload.sid };
 };
 
 /**
- * Check a refresh token and burn it in the same step, so it is single use: a
- * refresh that is replayed, by the app or by somebody who stole it, fails.
+ * The refresh token is 32 random bytes rather than a signed claim: it is only
+ * ever looked up by hash against a session, so there is nothing for a
+ * signature to add, and an opaque string cannot be mistaken for an access
+ * token or read if it leaks into a log.
+ *
+ * It carries its family in front of the random part. Only the current token's
+ * hash is stored, so a retired one matches nothing - and without the family
+ * there would be no way to tell "a token from this session, one rotation ago"
+ * from "a string somebody made up". That difference is the whole of reuse
+ * detection: the first means two holders and the session has to go.
+ *
+ * The family is not a secret and protects nothing; the 32 random bytes after
+ * it do.
  */
-export const consumeRefreshToken = async (token: string): Promise<RefreshTokenDoc> => {
-  let payload: Partial<Claims>;
-  try {
-    payload = jwt.verify(token, config.jwt.secret) as Partial<Claims>;
-  } catch {
-    throw new AppError('TOKEN_INVALID', 'Please sign in again');
-  }
-  if (payload.type !== 'refresh' || !payload.sub) {
-    throw new AppError('TOKEN_INVALID', 'Please sign in again');
-  }
+export const newRefreshToken = (family: string): string => `${family}.${randomBytes(32).toString('base64url')}`;
 
-  const stored = await RefreshToken.findOneAndDelete({
-    tokenHash: hash(token),
-    userId: payload.sub,
-    blacklisted: false,
-  });
-  if (!stored) {
-    throw new AppError('TOKEN_INVALID', 'Please sign in again');
-  }
-  return stored;
+/** The family a refresh token belongs to, or null if it is not one of ours. */
+export const familyOf = (token: string): string | null => {
+  const [family, secret] = token.split('.');
+  return family && secret ? family : null;
 };
 
-export const revokeRefreshToken = async (token: string): Promise<void> => {
-  await RefreshToken.deleteOne({ tokenHash: hash(token) });
-};
+/**
+ * Unsalted, because a lookup has to find the session from the token alone.
+ * What makes that safe is that the token is 256 bits of random: there is
+ * nothing to guess and no dictionary to run.
+ */
+export const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 
-/** Used when a member is removed: her sessions end with her membership. */
-export const revokeAllForUser = async (userId: UserDoc['_id']): Promise<void> => {
-  await RefreshToken.deleteMany({ userId });
-};
+/** A new family, started when a session is created and kept across its rotations. */
+export const newTokenFamily = (): string => randomUUID();
 
-export default { verifyAccessToken, generateAuthTokens, consumeRefreshToken, revokeRefreshToken, revokeAllForUser };
+export default { signAccessToken, verifyAccessToken, newRefreshToken, hashToken, newTokenFamily };

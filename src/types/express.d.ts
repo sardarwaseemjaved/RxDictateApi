@@ -9,6 +9,8 @@ declare global {
   namespace Express {
     interface AuthContext {
       userId: Types.ObjectId;
+      /** The session this token belongs to, checked live on every request. */
+      sessionId: string;
       phone: string;
       name: string;
     }

@@ -47,4 +47,14 @@ export const otpLimiter = limiter({
   },
 });
 
-export default { generalLimiter, authLimiter, otpLimiter };
+/**
+ * Signing out is cheap and must stay available - a limiter that refuses it
+ * leaves a session open - so this is only here to stop the endpoint being used
+ * to probe for live sessions.
+ */
+export const logoutLimiter = limiter({
+  windowMs: 60 * 1000,
+  limit: config.rateLimit.logoutMax,
+});
+
+export default { generalLimiter, authLimiter, otpLimiter, logoutLimiter };

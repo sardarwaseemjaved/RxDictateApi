@@ -6,9 +6,9 @@ import { Location, Membership, OtpCode, Practice, User, type LocationDoc, type U
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { sendOtp as sendOtpSms } from '../core/sms';
-import type { AuthIntent, MembershipView, Session, TokenPair } from '../shared/auth.schema';
+import type { AuthIntent, DeviceInfo, MembershipView, Session, TokenPair } from '../shared/auth.schema';
 import { addMinutes } from '../utils/time';
-import { generateAuthTokens, consumeRefreshToken, revokeRefreshToken } from './token.service';
+import { forgetDevice, identifySession, revokeSession, rotateSession, startSession } from './session.service';
 
 /**
  * Six digits from a CSPRNG. crypto.randomInt is uniform, unlike
@@ -222,6 +222,7 @@ const sessionFor = async (user: UserDoc, tokens: TokenPair, devCode?: string): P
 export const verifyOtp = async (
   phone: string,
   code: string,
+  device: DeviceInfo,
   name?: string,
   intent: AuthIntent = 'signIn',
 ): Promise<Session> => {
@@ -264,26 +265,84 @@ export const verifyOtp = async (
     ),
   );
 
-  const tokens = await generateAuthTokens(user);
-  logger.info(`sign-in for user ${String(user._id)}`);
+  // Any session this phone already had is retired, so one device holds one.
+  const { tokens } = await startSession(user, device);
+  logger.info(`sign-in for user ${String(user._id)} on device ${device.platform}`);
   return sessionFor(user, tokens);
 };
 
-/** Single-use refresh: the token presented is burned and a new pair is issued. */
+/**
+ * Single-use refresh: the token presented is replaced, and a token that comes
+ * back twice ends the session rather than being guessed about.
+ */
 export const refresh = async (refreshToken: string): Promise<Session> => {
-  const stored = await consumeRefreshToken(refreshToken);
+  const { session, tokens } = await rotateSession(refreshToken);
 
-  const user = await User.findById(stored.userId);
+  const user = await User.findById(session.userId);
   if (!user) {
-    throw new AppError('TOKEN_INVALID', 'Please sign in again');
+    // The account went away under a live session.
+    await revokeSession(session, 'admin');
+    throw new AppError('SESSION_REVOKED', 'Please sign in again');
   }
 
-  const tokens = await generateAuthTokens(user);
   return sessionFor(user, tokens);
 };
 
-export const logout = async (refreshToken: string): Promise<void> => {
-  await revokeRefreshToken(refreshToken);
+/**
+ * Sign out of this device.
+ *
+ * Identified from either credential, so a phone whose access token lapsed
+ * while the app was backgrounded can still end its session rather than
+ * leaving a live one behind. Never fails: a sign-out the app has to handle an
+ * error from is a sign-out that leaves a session open.
+ *
+ * The audit row is written per clinic the person can act in, the same way a
+ * sign-in is, because auditLogs is practice-scoped and a sign-out is a fact
+ * each of those clinics may need to account for.
+ */
+export const logout = async (
+  accessToken: string | undefined,
+  refreshToken: string | undefined,
+  context: { requestId?: string | null; ip?: string | null } = {},
+): Promise<void> => {
+  const session = await identifySession(accessToken, refreshToken);
+  if (!session) {
+    // Nothing to end. Still a success: the caller is signed out either way.
+    return;
+  }
+
+  const { revoked } = await revokeSession(session, 'logout');
+  if (!revoked) {
+    // Already signed out, so the first answer stands.
+    return;
+  }
+
+  await forgetDevice(session.userId, session.deviceId);
+
+  const memberships = await Membership.find({ userId: session.userId, status: 'active' });
+  await Promise.all(
+    memberships.map((membership) =>
+      writeAudit(
+        {
+          practiceId: membership.practiceId,
+          actorId: session.userId,
+          role: membership.role,
+          allowedLocationIds: membership.role === 'doctor' ? 'all' : membership.locationIds,
+        },
+        {
+          action: 'auth.logout',
+          entity: 'session',
+          entityId: session._id,
+          // Device and platform only. No token, hashed or otherwise.
+          after: { deviceId: session.deviceId, platform: session.platform },
+          requestId: context.requestId ?? null,
+          ip: context.ip ?? null,
+        },
+      ),
+    ),
+  );
+
+  logger.info(`sign-out for user ${String(session.userId)}`);
 };
 
-export default { sendOtp, verifyOtp, refresh, logout, membershipViews };
+export default { sendOtp, verifyOtp, refresh, logout, membershipViews, bootstrapPractice };

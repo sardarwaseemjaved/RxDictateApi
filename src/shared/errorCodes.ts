@@ -23,10 +23,14 @@ export const ERROR_CODES = [
   'OTP_LOCKED',
   'OTP_COOLDOWN',
   'TOKEN_INVALID',
+  'TOKEN_EXPIRED',
+  'SESSION_REVOKED',
+  'SESSION_EXPIRED',
 
   // Tenancy
   'PRACTICE_REQUIRED',
   'NOT_MEMBER',
+  'MEMBERSHIP_REMOVED',
   'LOCATION_REQUIRED',
   'LOCATION_NOT_ALLOWED',
   'LOCATION_ARCHIVED',
@@ -78,9 +82,17 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   OTP_LOCKED: 429,
   OTP_COOLDOWN: 429,
   TOKEN_INVALID: 401,
+  /** The access token is past its expiry. The app refreshes and retries. */
+  TOKEN_EXPIRED: 401,
+  /** Logged out, a rotated token reused, or the session is gone. Sign out locally. */
+  SESSION_REVOKED: 401,
+  /** The refresh token is past the session's expiry. Sign out locally. */
+  SESSION_EXPIRED: 401,
 
   PRACTICE_REQUIRED: 400,
   NOT_MEMBER: 403,
+  /** Was a member of this practice and was removed, as against never a member. */
+  MEMBERSHIP_REMOVED: 403,
   LOCATION_REQUIRED: 400,
   LOCATION_NOT_ALLOWED: 403,
   LOCATION_ARCHIVED: 409,

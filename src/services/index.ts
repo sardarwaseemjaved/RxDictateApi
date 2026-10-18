@@ -12,6 +12,7 @@ export * as prescriptionOpsService from './prescriptionOps.service';
 export * as prescriptionService from './prescription.service';
 export * as practiceService from './practice.service';
 export * as reportService from './report.service';
+export * as sessionService from './session.service';
 export * as sttService from './stt.service';
 export * as teamService from './team.service';
 export * as tokenService from './token.service';

@@ -40,9 +40,9 @@ describe('Error middlewares', () => {
       expect(converted.statusCode).toBe(409);
     });
 
-    test('should convert an expired token to TOKEN_INVALID', () => {
+    test('should convert an expired token to TOKEN_EXPIRED, which the app refreshes on', () => {
       const converted = run(new TokenExpiredError('jwt expired', new Date()));
-      expect(converted.code).toBe('TOKEN_INVALID');
+      expect(converted.code).toBe('TOKEN_EXPIRED');
       expect(converted.statusCode).toBe(401);
     });
 

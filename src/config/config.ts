@@ -37,7 +37,15 @@ const envSchema = z.object({
 
   JWT_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRATION_MINUTES: z.coerce.number().int().min(1).default(30),
-  JWT_REFRESH_EXPIRATION_DAYS: z.coerce.number().int().min(1).default(30),
+  /**
+   * How long a signed-in device stays signed in, and the hard ceiling that a
+   * sliding expiry cannot climb past - so a phone refreshing every day cannot
+   * keep one sign-in alive forever.
+   */
+  SESSION_EXPIRATION_DAYS: z.coerce.number().int().min(1).default(60),
+  SESSION_MAX_DAYS: z.coerce.number().int().min(1).default(90),
+  /** How long "this session is live" is believed without asking the database. */
+  SESSION_CACHE_SECONDS: z.coerce.number().int().min(0).max(300).default(60),
 
   OTP_EXPIRATION_MINUTES: z.coerce.number().int().min(1).default(10),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(5),
@@ -59,6 +67,8 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(300),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
   OTP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(5),
+  /** Per minute, per IP. Signing out must stay available. */
+  LOGOUT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
 
   /**
    * The address this API is reachable at from outside, used to build download
@@ -172,7 +182,11 @@ const config = {
   jwt: {
     secret: env.JWT_SECRET,
     accessExpirationMinutes: env.JWT_ACCESS_EXPIRATION_MINUTES,
-    refreshExpirationDays: env.JWT_REFRESH_EXPIRATION_DAYS,
+  },
+  session: {
+    expirationDays: env.SESSION_EXPIRATION_DAYS,
+    maxDays: env.SESSION_MAX_DAYS,
+    cacheSeconds: env.SESSION_CACHE_SECONDS,
   },
   otp: {
     expirationMinutes: env.OTP_EXPIRATION_MINUTES,
@@ -204,6 +218,7 @@ const config = {
     max: env.RATE_LIMIT_MAX,
     authMax: env.AUTH_RATE_LIMIT_MAX,
     otpMax: env.OTP_RATE_LIMIT_MAX,
+    logoutMax: env.LOGOUT_RATE_LIMIT_MAX,
   },
   /** Where a download link should point. */
   publicApiUrl: env.PUBLIC_API_URL ?? `http://${lanAddress() ?? 'localhost'}:${env.PORT}`,

@@ -195,7 +195,13 @@ describe('Tenancy', () => {
       await request(app).patch('/api/v1/practice').set(paHeaders).send({ name: 'Nope' }).expect(403);
     });
 
-    test('removing her ends her session immediately', async () => {
+    /**
+     * Being taken off one clinic is not being signed out. She may work at
+     * another on the same sign-in, so her session stands and only her access
+     * to this practice stops - which it does at once, because membership is
+     * read on every request rather than carried in the token.
+     */
+    test('removing her stops her access to that clinic at once, and says so', async () => {
       const { doctor } = await aClinic('+923001110019');
       const pa = await aPa(doctor, '+923001110020');
       const paHeaders = { Authorization: `Bearer ${pa.accessToken}`, 'X-Practice-Id': doctor.practiceId };
@@ -207,10 +213,63 @@ describe('Tenancy', () => {
 
       await request(app).delete(`/api/v1/members/${membership.id}`).set(headersFor(doctor)).expect(200);
 
-      // The access token is still signed and unexpired, but membership is read
-      // on every request, so it stops working now rather than in half an hour.
+      // The access token is still signed and unexpired, and her session is
+      // still live - but this clinic is no longer hers.
       const after = await request(app).get('/api/v1/patients').set(paHeaders).expect(403);
-      expect(after.body.error.code).toBe('NOT_MEMBER');
+      expect(after.body.error.code).toBe('MEMBERSHIP_REMOVED');
+
+      // Her sign-in itself still works, and the clinic she lost is simply not
+      // in the list any more.
+      const me = await request(app)
+        .get('/api/v1/me')
+        .set({ Authorization: `Bearer ${pa.accessToken}` })
+        .expect(200);
+      expect(me.body.data.memberships).toEqual([]);
+    });
+
+    test('a practice she was never on still reads as not hers, not as removed', async () => {
+      const a = await aClinic('+923001110021');
+      const b = await aClinic('+923001110022');
+
+      const response = await request(app)
+        .get('/api/v1/patients')
+        .set({ Authorization: `Bearer ${a.doctor.accessToken}`, 'X-Practice-Id': b.doctor.practiceId })
+        .expect(403);
+      expect(response.body.error.code).toBe('NOT_MEMBER');
+    });
+
+    test('a PA on two clinics keeps the other one when she is removed from one', async () => {
+      const first = await aClinic('+923001110023');
+      const second = await aClinic('+923001110024');
+
+      const pa = await aPa(first.doctor, '+923001110025');
+      await request(app)
+        .post('/api/v1/members')
+        .set(headersFor(second.doctor))
+        .send({ phone: '+923001110025', role: 'pa', locationIds: [second.doctor.locationId] })
+        .expect(201);
+
+      const members = await request(app).get('/api/v1/members').set(headersFor(first.doctor)).expect(200);
+      const membership = members.body.data.find((member: { role: string }) => member.role === 'pa');
+      await request(app).delete(`/api/v1/members/${membership.id}`).set(headersFor(first.doctor)).expect(200);
+
+      // Removed from the first, still working at the second on the same
+      // sign-in: the exact case that makes revoking her sessions wrong.
+      await request(app)
+        .get('/api/v1/patients')
+        .set({ Authorization: `Bearer ${pa.accessToken}`, 'X-Practice-Id': first.doctor.practiceId })
+        .expect(403);
+      await request(app)
+        .get('/api/v1/patients')
+        .set({ Authorization: `Bearer ${pa.accessToken}`, 'X-Practice-Id': second.doctor.practiceId })
+        .expect(200);
+
+      const me = await request(app)
+        .get('/api/v1/me')
+        .set({ Authorization: `Bearer ${pa.accessToken}` })
+        .expect(200);
+      expect(me.body.data.memberships).toHaveLength(1);
+      expect(me.body.data.memberships[0].practiceId).toBe(second.doctor.practiceId);
     });
   });
 });

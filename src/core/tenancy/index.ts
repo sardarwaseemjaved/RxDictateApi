@@ -33,12 +33,18 @@ export const resolvePractice: RequestHandler = catchAsync(async (req, _res, next
   }
   const practiceId = asObjectId(header, 'X-Practice-Id');
 
-  const membership = await Membership.findOne({
-    practiceId,
-    userId: req.auth.userId,
-    status: 'active',
-  });
-  if (!membership) {
+  const membership = await Membership.findOne({ practiceId, userId: req.auth.userId });
+
+  /**
+   * Removed and never a member are different facts and the app says different
+   * things about them: one is "you were taken off this clinic", the other is
+   * "this is not your clinic". Her sign-in itself is still good - she may work
+   * at another clinic - so this is a 403 about one practice and not a 401.
+   */
+  if (membership?.status === 'removed') {
+    throw new AppError('MEMBERSHIP_REMOVED', 'You have been removed from this clinic.');
+  }
+  if (!membership || membership.status !== 'active') {
     throw new AppError('NOT_MEMBER', 'You do not have access to this clinic');
   }
 

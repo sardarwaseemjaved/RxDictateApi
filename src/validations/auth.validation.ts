@@ -1,4 +1,10 @@
-import { logoutBodySchema, refreshBodySchema, sendOtpBodySchema, verifyOtpBodySchema } from '../shared/auth.schema';
+import {
+  logoutAllBodySchema,
+  logoutBodySchema,
+  refreshBodySchema,
+  sendOtpBodySchema,
+  verifyOtpBodySchema,
+} from '../shared/auth.schema';
 
 /**
  * Request wiring only. The schemas themselves live in src/shared, which the app
@@ -10,3 +16,4 @@ export const sendOtp = { body: sendOtpBodySchema };
 export const verifyOtp = { body: verifyOtpBodySchema };
 export const refresh = { body: refreshBodySchema };
 export const logout = { body: logoutBodySchema };
+export const logoutAll = { body: logoutAllBodySchema };

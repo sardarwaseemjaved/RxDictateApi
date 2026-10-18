@@ -5,6 +5,7 @@ import config from './config/config';
 import logger from './config/logger';
 import { syncCollections } from './models';
 import { sweepExpiredAudio, sweepStalledSegments } from './services/voice.service';
+import { markExpiredSessions } from './services/session.service';
 
 let server: Server | undefined;
 
@@ -22,6 +23,9 @@ let server: Server | undefined;
  * - A segment whose processing began and never finished - because this process
  *   restarted mid-transcription - is marked failed, so the segments queued
  *   behind it are not stuck forever.
+ * - A session past its expiry is marked revoked, so it reads as ended rather
+ *   than sitting there technically usable until Mongo's TTL removes it a month
+ *   later.
  */
 const startSweeps = (): void => {
   const run = (what: string, job: () => Promise<number>) => {
@@ -30,9 +34,11 @@ const startSweeps = (): void => {
 
   run('stalled segment', sweepStalledSegments);
   run('audio retention', sweepExpiredAudio);
+  run('expired session', markExpiredSessions);
 
   setInterval(() => run('stalled segment', sweepStalledSegments), 5 * 60 * 1000).unref();
   setInterval(() => run('audio retention', sweepExpiredAudio), 6 * 60 * 60 * 1000).unref();
+  setInterval(() => run('expired session', markExpiredSessions), 24 * 60 * 60 * 1000).unref();
 };
 
 const start = async (): Promise<void> => {

@@ -98,6 +98,11 @@ export interface EventPayloads {
     appointmentId: Types.ObjectId;
     actorId: Types.ObjectId;
   };
+  'session.revoked': {
+    userId: Types.ObjectId;
+    sessionId: Types.ObjectId;
+    reason: 'logout' | 'logout_all' | 'reuse_detected' | 'expired' | 'admin';
+  };
   'report.uploaded': {
     practiceId: Types.ObjectId;
     patientId: Types.ObjectId;

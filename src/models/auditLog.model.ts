@@ -19,6 +19,8 @@ export interface IAuditLog {
   after: unknown;
   at: Date;
   requestId: string | null;
+  /** Where the request came from. Worth having on a sign-in or a sign-out. */
+  ip: string | null;
 }
 
 export type AuditLogDoc = HydratedDocument<IAuditLog>;
@@ -36,6 +38,7 @@ const auditLogSchema = new Schema<IAuditLog>(
     after: { type: Schema.Types.Mixed, default: null },
     at: { type: Date, default: () => new Date() },
     requestId: { type: String, default: null },
+    ip: { type: String, default: null },
   },
   { timestamps: false },
 );

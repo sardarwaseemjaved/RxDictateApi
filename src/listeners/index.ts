@@ -185,6 +185,14 @@ on('voice.segmentFailed', async ({ practiceId, prescriptionId, doctorId, seq, er
   });
 });
 
+/**
+ * Nothing acts on this yet. It is the seam live updates will hang off: when
+ * there is an open connection per session, this is where it gets told to close.
+ */
+on('session.revoked', ({ sessionId, reason }) => {
+  logger.debug(`session ${String(sessionId)} revoked: ${reason}`);
+});
+
 on('voice.segmentApplied', ({ prescriptionId, seq, opCount }) => {
   logger.debug(`voice segment ${seq} applied ${opCount} ops to prescription ${String(prescriptionId)}`);
 });

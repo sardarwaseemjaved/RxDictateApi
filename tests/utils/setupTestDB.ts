@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { syncCollections } from '../../src/models';
 import { removeAllListeners } from '../../src/core/events';
+import { clearSessionCache } from '../../src/services/session.service';
 
 /**
  * An in-memory mongod per test file.
@@ -20,6 +21,8 @@ const setupTestDB = (): void => {
   }, 120_000);
 
   beforeEach(async () => {
+    // The session cache is in process, so it outlives the collections.
+    clearSessionCache();
     await Promise.all(Object.values(mongoose.connection.collections).map(async (collection) => collection.deleteMany({})));
   });
 

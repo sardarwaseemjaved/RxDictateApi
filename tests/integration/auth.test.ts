@@ -9,6 +9,16 @@ setupTestDB();
 
 const sendTo = (phone: string) => request(app).post('/api/v1/auth/otp/send').send({ phone });
 
+/**
+ * Verifying now says which phone is signing in, so one device holds one
+ * session. A fresh id per call unless a test deliberately reuses one.
+ */
+let deviceCounter = 0;
+const aDevice = (deviceId?: string) => {
+  deviceCounter += 1;
+  return { deviceId: deviceId ?? `test-device-${deviceCounter}`, platform: 'ios' as const, appVersion: '1.0.0' };
+};
+
 describe('Auth', () => {
   describe('POST /api/v1/auth/otp/send', () => {
     test('issues a code, stored hashed, and never returns it in the body in production', async () => {
@@ -44,13 +54,13 @@ describe('Auth', () => {
 
       const stale = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440004', code: first.body.data.devCode })
+        .send({ phone: '+923004440004', code: first.body.data.devCode, ...aDevice() })
         .expect(401);
       expect(stale.body.error.code).toBe('OTP_INVALID');
 
       await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440004', code: second.body.data.devCode })
+        .send({ phone: '+923004440004', code: second.body.data.devCode, ...aDevice() })
         .expect(200);
     });
 
@@ -115,21 +125,21 @@ describe('Auth', () => {
         // eslint-disable-next-line no-await-in-loop
         const response = await request(app)
           .post('/api/v1/auth/otp/verify')
-          .send({ phone: '+923004440014', code: wrong })
+          .send({ phone: '+923004440014', code: wrong, ...aDevice() })
           .expect(401);
         expect(response.body.error.code).toBe('OTP_INVALID');
       }
 
       const locked = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440014', code: wrong })
+        .send({ phone: '+923004440014', code: wrong, ...aDevice() })
         .expect(429);
       expect(locked.body.error.code).toBe('OTP_LOCKED');
 
       // Burned, so the right code no longer works either.
       const after = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440014', code: sent.body.data.devCode })
+        .send({ phone: '+923004440014', code: sent.body.data.devCode, ...aDevice() })
         .expect(401);
       expect(after.body.error.code).toBe('OTP_EXPIRED');
     });
@@ -138,12 +148,12 @@ describe('Auth', () => {
       const sent = await sendTo('+923004440015').expect(200);
       await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440015', code: sent.body.data.devCode })
+        .send({ phone: '+923004440015', code: sent.body.data.devCode, ...aDevice() })
         .expect(200);
 
       const replay = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440015', code: sent.body.data.devCode })
+        .send({ phone: '+923004440015', code: sent.body.data.devCode, ...aDevice() })
         .expect(401);
       expect(replay.body.error.code).toBe('OTP_EXPIRED');
     });
@@ -160,7 +170,7 @@ describe('Auth', () => {
 
       const session = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440080', code: sent.body.data.devCode, intent: 'signIn' })
+        .send({ phone: '+923004440080', code: sent.body.data.devCode, intent: 'signIn', ...aDevice() })
         .expect(200);
 
       expect(session.body.data.memberships).toEqual([]);
@@ -175,7 +185,7 @@ describe('Auth', () => {
 
       const session = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440081', code: sent.body.data.devCode })
+        .send({ phone: '+923004440081', code: sent.body.data.devCode, ...aDevice() })
         .expect(200);
 
       expect(session.body.data.memberships).toEqual([]);
@@ -304,7 +314,7 @@ describe('Auth', () => {
 
       const session = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440040', code: '123456', name: 'Dr Test', intent: 'signUp' })
+        .send({ phone: '+923004440040', code: '123456', name: 'Dr Test', intent: 'signUp', ...aDevice() })
         .expect(200);
       expect(session.body.data.memberships[0].role).toBe('doctor');
     });
@@ -321,16 +331,19 @@ describe('Auth', () => {
       // A wrong code is still wrong.
       const wrong = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440042', code: '000000' })
+        .send({ phone: '+923004440042', code: '000000', ...aDevice() })
         .expect(401);
       expect(wrong.body.error.code).toBe('OTP_INVALID');
 
-      await request(app).post('/api/v1/auth/otp/verify').send({ phone: '+923004440042', code: '123456' }).expect(200);
+      await request(app)
+        .post('/api/v1/auth/otp/verify')
+        .send({ phone: '+923004440042', code: '123456', ...aDevice() })
+        .expect(200);
 
       // And still consumed, so a replay of even a fixed code fails.
       const replay = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440042', code: '123456' })
+        .send({ phone: '+923004440042', code: '123456', ...aDevice() })
         .expect(401);
       expect(replay.body.error.code).toBe('OTP_EXPIRED');
     });
@@ -342,7 +355,7 @@ describe('Auth', () => {
       // not a master key.
       const response = await request(app)
         .post('/api/v1/auth/otp/verify')
-        .send({ phone: '+923004440043', code: '123456' })
+        .send({ phone: '+923004440043', code: '123456', ...aDevice() })
         .expect(401);
       expect(response.body.error.code).toBe('OTP_EXPIRED');
       expect(await User.countDocuments({ phone: '+923004440043' })).toBe(0);
@@ -350,17 +363,24 @@ describe('Auth', () => {
   });
 
   describe('tokens', () => {
-    test('a refresh token is single use and returns a fresh pair', async () => {
+    test('a refresh token is single use, and a replay ends the session', async () => {
       const doctor = await signUp('+923004440020');
 
       const refreshed = await request(app)
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: doctor.refreshToken })
         .expect(200);
-      expect(refreshed.body.data.tokens.refresh.token).not.toBe(doctor.refreshToken);
+      const rotated = refreshed.body.data.tokens.refresh.token as string;
+      expect(rotated).not.toBe(doctor.refreshToken);
 
+      // The old one coming back means two holders and no way to tell which is
+      // the phone, so the session goes - including for whoever held the newer
+      // token.
       const replay = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: doctor.refreshToken }).expect(401);
-      expect(replay.body.error.code).toBe('TOKEN_INVALID');
+      expect(replay.body.error.code).toBe('SESSION_REVOKED');
+
+      const after = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: rotated }).expect(401);
+      expect(after.body.error.code).toBe('SESSION_REVOKED');
     });
 
     test('an access token cannot be used as a refresh token', async () => {
@@ -369,7 +389,9 @@ describe('Auth', () => {
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: doctor.accessToken })
         .expect(401);
-      expect(response.body.error.code).toBe('TOKEN_INVALID');
+      // It hashes to nothing this server stored, which reads the same as a
+      // session that is gone.
+      expect(response.body.error.code).toBe('SESSION_REVOKED');
     });
 
     test('a refresh token cannot be used as an access token', async () => {
@@ -381,7 +403,7 @@ describe('Auth', () => {
       expect(response.body.error.code).toBe('TOKEN_INVALID');
     });
 
-    test('logout revokes the refresh token', async () => {
+    test('logout ends the session, so the refresh token is dead too', async () => {
       const doctor = await signUp('+923004440023');
       await request(app).post('/api/v1/auth/logout').send({ refreshToken: doctor.refreshToken }).expect(200);
 
@@ -389,7 +411,7 @@ describe('Auth', () => {
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: doctor.refreshToken })
         .expect(401);
-      expect(response.body.error.code).toBe('TOKEN_INVALID');
+      expect(response.body.error.code).toBe('SESSION_REVOKED');
     });
   });
 

@@ -12,6 +12,7 @@ export interface AuditEntry {
   after?: unknown;
   locationId?: Types.ObjectId | null;
   requestId?: string | null;
+  ip?: string | null;
 }
 
 /**
@@ -37,6 +38,7 @@ export const writeAudit = async (scope: Scope, entry: AuditEntry): Promise<void>
     after: entry.after ?? null,
     at: new Date(),
     requestId: entry.requestId ?? null,
+    ip: entry.ip ?? null,
   });
 };
 
