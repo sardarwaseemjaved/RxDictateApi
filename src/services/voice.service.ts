@@ -127,7 +127,21 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   const extension = segment.audio.key.split('.').pop() ?? 'm4a';
   const audio = await getObject(segment.audio.key);
 
-  const transcription = await transcribe(audio, CONTENT_TYPE_BY_EXTENSION[extension] ?? 'audio/m4a');
+  const prescription = await Prescription.findOne({ _id: session.prescriptionId, deletedAt: null });
+  if (!prescription) {
+    throw AppError.notFound('Prescription');
+  }
+  if (prescription.status !== 'draft') {
+    throw new AppError('VOICE_SESSION_CLOSED', 'That prescription is no longer a draft.');
+  }
+  const sections = wireSections(prescription.sections);
+
+  const transcription = await transcribe(audio, CONTENT_TYPE_BY_EXTENSION[extension] ?? 'audio/m4a', {
+    // A brand name is the word a general model gets wrong and the word that
+    // has to be right, so what is already on the draft is given to it.
+    drugNames: sections.medicines.map((medicine) => medicine.name),
+    durationMs: segment.audio.durationMs,
+  });
   segment.transcript = transcription.transcript;
   segment.spans = transcription.spans;
   segment.sttProvider = transcription.provider;
@@ -136,28 +150,38 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   session.markModified('segments');
   await session.save();
 
-  const prescription = await Prescription.findOne({ _id: session.prescriptionId, deletedAt: null });
-  if (!prescription) {
-    throw AppError.notFound('Prescription');
-  }
-  if (prescription.status !== 'draft') {
-    throw new AppError('VOICE_SESSION_CLOSED', 'That prescription is no longer a draft.');
-  }
-
   const extraction = await extractOps({
     transcript: transcription.transcript,
     spans: transcription.spans,
-    sections: wireSections(prescription.sections),
+    sections,
   });
+
+  /**
+   * The extractor decides the English rendering and whether a span was
+   * dictation or the doctor talking to the patient: it has read the whole
+   * transcript, where the transcriber saw one clause at a time. The original
+   * is never touched, so a line can always be traced to what was actually
+   * said.
+   */
+  const annotations = new Map(extraction.spans.map((span) => [span.id, span]));
+  segment.spans = segment.spans.map((span) => {
+    const annotation = annotations.get(span.id);
+    return annotation
+      ? { ...span, english: annotation.english || span.original, isDictation: annotation.isDictation }
+      : span;
+  });
+
   segment.ops = extraction.ops;
   segment.llmModel = extraction.model;
   segment.costUsd = (segment.costUsd ?? 0) + (extraction.costUsd ?? 0);
 
-  const { sections } = applyOps(wireSections(prescription.sections), extraction.ops, {
+  // Applied to the sections as they are now, not the copy the extractor was
+  // shown: an earlier segment may have landed while this one was in flight.
+  const applied = applyOps(wireSections(prescription.sections), extraction.ops, {
     actorId: session.doctorId,
     origin: 'voice',
   });
-  prescription.set('sections', sections);
+  prescription.set('sections', applied.sections);
   // A draft the doctor has already typed into and then dictated over is both.
   prescription.source = prescription.editLog.length > 0 ? 'mixed' : 'voice';
   await prescription.save();

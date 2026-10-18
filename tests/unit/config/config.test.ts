@@ -72,6 +72,63 @@ describe('Config', () => {
     });
   });
 
+  describe('the OpenAI key', () => {
+    /**
+     * A doctor finding out mid-consultation that dictation was never
+     * configured is worse than a server that refuses to start.
+     */
+    test('is required when speech to text is openai', () => {
+      process.env.STT_PROVIDER = 'openai';
+      // Blank, not deleted: dotenv would refill a deleted key from whoever's
+      // .env this runs on, and blank is what "no key" looks like anyway.
+      process.env.OPENAI_API_KEY = '';
+      expect(load).toThrow(/OPENAI_API_KEY is required when STT_PROVIDER or LLM_PROVIDER is openai/);
+    });
+
+    test('is required when the extractor is openai', () => {
+      process.env.LLM_PROVIDER = 'openai';
+      // Blank, not deleted: dotenv would refill a deleted key from whoever's
+      // .env this runs on, and blank is what "no key" looks like anyway.
+      process.env.OPENAI_API_KEY = '';
+      expect(load).toThrow(/OPENAI_API_KEY is required/);
+    });
+
+    test('is not required while both providers are off', () => {
+      process.env.STT_PROVIDER = 'none';
+      process.env.LLM_PROVIDER = 'none';
+      // Blank, not deleted: dotenv would refill a deleted key from whoever's
+      // .env this runs on, and blank is what "no key" looks like anyway.
+      process.env.OPENAI_API_KEY = '';
+      expect(load().openai.apiKey).toBeUndefined();
+    });
+
+    test('boots with a key, and the models default sensibly', () => {
+      process.env.STT_PROVIDER = 'openai';
+      process.env.LLM_PROVIDER = 'openai';
+      process.env.OPENAI_API_KEY = 'sk-test-not-a-real-key';
+      delete process.env.OPENAI_MODEL;
+      delete process.env.OPENAI_STT_MODEL;
+
+      const config = load();
+      expect(config.openai.model).toBe('gpt-4o-mini');
+      // Reads code-switched Urdu and English better than whisper-1, which is
+      // the whole job here.
+      expect(config.openai.sttModel).toBe('gpt-4o-transcribe');
+      expect(config.openai.baseUrl).toBe('https://api.openai.com/v1');
+    });
+
+    test('a key of spaces is still a key, because trimming it is not our call', () => {
+      process.env.STT_PROVIDER = 'openai';
+      process.env.OPENAI_API_KEY = ' ';
+      expect(load().openai.apiKey).toBe(' ');
+    });
+
+    test('a provider nobody has written is refused', () => {
+      process.env.STT_PROVIDER = 'anthropic';
+      expect(load).toThrow(/STT_PROVIDER/);
+    });
+  });
+
   describe('required variables', () => {
     /**
      * Blank rather than deleted: dotenv does not overwrite a key that is

@@ -83,8 +83,30 @@ const envSchema = z.object({
   APP_NAME: z.string().min(1).max(60).default('the clinic app'),
 
   /** Speech to text and the ops extractor. `none` fails a segment with a clear error. */
-  STT_PROVIDER: z.enum(['none', 'mock']).default('none'),
-  LLM_PROVIDER: z.enum(['none', 'mock']).default('none'),
+  STT_PROVIDER: z.enum(['none', 'mock', 'openai']).default('none'),
+  LLM_PROVIDER: z.enum(['none', 'mock', 'openai']).default('none'),
+
+  /**
+   * Required when either provider is openai. Never logged and never returned.
+   *
+   * A blank value reads as no key rather than as a validation error, so a
+   * commented-out line in .env behaves the way whoever commented it out meant.
+   */
+  OPENAI_API_KEY: z
+    .string()
+    .min(1)
+    .or(z.literal(''))
+    .optional()
+    .transform((value) => (value === '' ? undefined : value)),
+  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  /** The model that turns a transcript into ops. */
+  OPENAI_MODEL: z.string().min(1).default('gpt-4o-mini'),
+  /**
+   * The transcription model. gpt-4o-transcribe reads code-switched Urdu and
+   * English better than whisper-1 does, which is the whole job here;
+   * gpt-4o-mini-transcribe is half the price if that trade is worth making.
+   */
+  OPENAI_STT_MODEL: z.string().min(1).default('gpt-4o-transcribe'),
   /** A segment that has not finished in this long is marked failed so the queue moves on. */
   VOICE_SEGMENT_TIMEOUT_MS: z.coerce.number().int().min(1000).default(90_000),
 
@@ -110,6 +132,16 @@ const env = parsed.data;
  */
 if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
   throw new Error('Config validation error: CORS_ORIGINS must list at least one origin in production');
+}
+
+/**
+ * Fail at boot rather than on the first recording. A doctor finding out
+ * mid-consultation that dictation was never configured is worse than a server
+ * that refuses to start.
+ */
+const usesOpenAi = env.STT_PROVIDER === 'openai' || env.LLM_PROVIDER === 'openai';
+if (usesOpenAi && !env.OPENAI_API_KEY) {
+  throw new Error('Config validation error: OPENAI_API_KEY is required when STT_PROVIDER or LLM_PROVIDER is openai');
 }
 
 const defaultDevOrigins = ['http://localhost:3000', 'http://localhost:8081', 'http://localhost:19006'];
@@ -196,6 +228,16 @@ const config = {
     sttProvider: env.STT_PROVIDER,
     llmProvider: env.LLM_PROVIDER,
     segmentTimeoutMs: env.VOICE_SEGMENT_TIMEOUT_MS,
+  },
+  openai: {
+    /**
+     * Read only by the two provider modules. It is never logged, never put in
+     * a response and never written to the audit log.
+     */
+    apiKey: env.OPENAI_API_KEY,
+    baseUrl: env.OPENAI_BASE_URL,
+    model: env.OPENAI_MODEL,
+    sttModel: env.OPENAI_STT_MODEL,
   },
   pdf: {
     rendererUrl: env.PDF_RENDERER_URL,

@@ -68,37 +68,41 @@ Copy `.env.example`. Everything is validated by zod at boot in
 [src/config/config.ts](src/config/config.ts), which fails fast rather than
 letting a missing variable become a runtime surprise. The full set:
 
-| Variable                                    | Default                    | Notes                                                      |
-| ------------------------------------------- | -------------------------- | ---------------------------------------------------------- |
-| `PORT`                                      | `3000`                     |                                                            |
-| `MONGODB_URL`                               | —                          | required; `-test` is appended when `NODE_ENV=test`         |
-| `JWT_SECRET`                                | —                          | required, at least 16 characters                           |
-| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`                       |                                                            |
-| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`                       |                                                            |
-| `OTP_EXPIRATION_MINUTES`                    | `10`                       |                                                            |
-| `OTP_MAX_ATTEMPTS`                          | `5`                        | wrong guesses before the code is burned                    |
-| `OTP_COOLDOWN_SECONDS`                      | `60`                       | per phone number, survives a restart                       |
-| `OTP_LOG_IN_DEV`                            | `true`                     | outside production, return the code as `devCode`           |
-| `CORS_ORIGINS`                              | dev localhosts             | comma separated; **required in production**                |
-| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                       |                                                            |
-| `RATE_LIMIT_MAX`                            | `300`                      | the whole API                                              |
-| `AUTH_RATE_LIMIT_MAX`                       | `20`                       | sign-in                                                    |
-| `OTP_RATE_LIMIT_MAX`                        | `5`                        | keyed on the phone number, not the IP                      |
-| `PUBLIC_API_URL`                            | this machine's LAN address | where download links point; set it behind a proxy          |
-| `STORAGE_DRIVER`                            | `local`                    | `local` or `s3`                                            |
-| `STORAGE_LOCAL_DIR`                         | `.storage`                 | for the `local` driver                                     |
-| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —                          | any S3 or R2 bucket                                        |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —                          |                                                            |
-| `S3_FORCE_PATH_STYLE`                       | `true`                     | needed by R2 and MinIO                                     |
-| `SIGNED_URL_TTL_SECONDS`                    | `300`                      | audio and PDF links                                        |
-| `MAX_AUDIO_UPLOAD_MB`                       | `20`                       | per dictation segment                                      |
-| `SMS_PROVIDER`                              | `log`                      | sign-in codes and "you were added"                         |
-| `SMS_SENDER_ID`                             | `Clinic`                   |                                                            |
-| `STT_PROVIDER`                              | `none`                     | `none` or `mock`; see **Voice** below                      |
-| `LLM_PROVIDER`                              | `none`                     | `none` or `mock`                                           |
-| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`                    | a stalled segment is failed, not left hanging              |
-| `PDF_RENDERER_URL`                          | —                          | an HTML-to-PDF service; without one the print file is HTML |
-| `AUDIO_RETENTION_DAYS`                      | `30`                       | default for a new practice, days after approval            |
+| Variable                                    | Default                     | Notes                                                            |
+| ------------------------------------------- | --------------------------- | ---------------------------------------------------------------- |
+| `PORT`                                      | `3000`                      |                                                                  |
+| `MONGODB_URL`                               | —                           | required; `-test` is appended when `NODE_ENV=test`               |
+| `JWT_SECRET`                                | —                           | required, at least 16 characters                                 |
+| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`                        |                                                                  |
+| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`                        |                                                                  |
+| `OTP_EXPIRATION_MINUTES`                    | `10`                        |                                                                  |
+| `OTP_MAX_ATTEMPTS`                          | `5`                         | wrong guesses before the code is burned                          |
+| `OTP_COOLDOWN_SECONDS`                      | `60`                        | per phone number, survives a restart                             |
+| `OTP_LOG_IN_DEV`                            | `true`                      | outside production, return the code as `devCode`                 |
+| `CORS_ORIGINS`                              | dev localhosts              | comma separated; **required in production**                      |
+| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                        |                                                                  |
+| `RATE_LIMIT_MAX`                            | `300`                       | the whole API                                                    |
+| `AUTH_RATE_LIMIT_MAX`                       | `20`                        | sign-in                                                          |
+| `OTP_RATE_LIMIT_MAX`                        | `5`                         | keyed on the phone number, not the IP                            |
+| `PUBLIC_API_URL`                            | this machine's LAN address  | where download links point; set it behind a proxy                |
+| `STORAGE_DRIVER`                            | `local`                     | `local` or `s3`                                                  |
+| `STORAGE_LOCAL_DIR`                         | `.storage`                  | for the `local` driver                                           |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —                           | any S3 or R2 bucket                                              |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —                           |                                                                  |
+| `S3_FORCE_PATH_STYLE`                       | `true`                      | needed by R2 and MinIO                                           |
+| `SIGNED_URL_TTL_SECONDS`                    | `300`                       | audio and PDF links                                              |
+| `MAX_AUDIO_UPLOAD_MB`                       | `20`                        | per dictation segment                                            |
+| `SMS_PROVIDER`                              | `log`                       | sign-in codes and "you were added"                               |
+| `SMS_SENDER_ID`                             | `Clinic`                    |                                                                  |
+| `STT_PROVIDER`                              | `none`                      | `none`, `mock` or `openai`; see **Voice** below                  |
+| `LLM_PROVIDER`                              | `none`                      | `none`, `mock` or `openai`                                       |
+| `OPENAI_API_KEY`                            | —                           | required when either provider is `openai`; boot fails without it |
+| `OPENAI_BASE_URL`                           | `https://api.openai.com/v1` |                                                                  |
+| `OPENAI_MODEL`                              | `gpt-4o-mini`               | turns a transcript into ops                                      |
+| `OPENAI_STT_MODEL`                          | `gpt-4o-transcribe`         | transcription                                                    |
+| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`                     | a stalled segment is failed, not left hanging                    |
+| `PDF_RENDERER_URL`                          | —                           | an HTML-to-PDF service; without one the print file is HTML       |
+| `AUDIO_RETENTION_DAYS`                      | `30`                        | default for a new practice, days after approval                  |
 
 ## Layout
 
@@ -447,14 +451,39 @@ audio → transcript + spans → ops → server validates → server applies
 Every line on the page keeps the `sourceSpanIds` it came from, so it can always be
 traced back to what was said.
 
+**Where the audio goes.** With `STT_PROVIDER=openai`, each recording is sent to
+OpenAI to be transcribed and the transcript is sent on to be turned into ops.
+The recording itself is kept in the clinic's own private storage and deleted
+`AUDIO_RETENTION_DAYS` after the prescription is approved (30 by default); the
+transcript stays, because it is the record of what was dictated. A clinic needs
+to be able to tell a patient that, so it is stated here rather than left to be
+discovered. Nothing is sent anywhere while both providers are `none`.
+
 **The transcriber and the ops extractor are seams, and default to `none`**, which
 fails a segment with a clear error. Choosing them is a decision about accuracy on
 Pakistani code-switched speech and about where patient audio is allowed to go, and
-it is not made here; what is settled is the contract on either side. Implement
-[stt.service.ts](src/services/stt.service.ts) and
-[llm.service.ts](src/services/llm.service.ts) and nothing else changes. The `mock`
-drivers read the upload as UTF-8 text and accept a JSON array of ops, which is how
-the ordering, validation, apply and audit path is tested end to end.
+it is not made here; what is settled is the contract on either side. The `mock` drivers read the upload as UTF-8 text and accept a JSON array of
+ops, which is how the ordering, validation, apply and audit path is tested end
+to end.
+
+**With `openai`:** the transcriber is told it is hearing Pakistani clinical
+dictation that switches language inside a sentence, and is given the drug names
+already on the draft - a brand name is the word a general model gets wrong and
+the word that has to be right. The extractor is called with structured output
+against a JSON schema built from the shared constants, so renaming a section
+changes what the model may say without anybody editing a prompt, and it is sent
+the draft with its item ids so "change the Panadol to twice a day" updates that
+line instead of adding a second one. It is told to use only what was said: a
+medicine needs a name, and a dose or duration that was not said is left empty
+and flagged rather than guessed - which means `RX_HAS_FLAGS` stops it being
+approved until the doctor has looked. Speech to the patient produces no ops.
+
+Whatever comes back is still only a proposal. `validateOps` checks every op
+before a single section is touched, so an invented item id or a section that
+does not exist fails that segment and leaves the draft alone. `costUsd` is
+estimated from the audio minutes and the token usage against published rates,
+for comparing one dictation with another - it is not a bill, and a model that
+is not in the rate table reports null rather than a made-up number.
 
 Two things keep the queue from wedging: a timeout that fails a segment so the ones
 behind it move, and a sweep that does the same for a segment whose processing began
@@ -528,16 +557,17 @@ No local mongod, no CI service container.
 
 The suites that exist to hold the six rules down:
 
-| File                                                                                       | What it proves                                                                                                                                               |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to her own locations; removing her ends her session now                                  |
-| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number |
-| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript             |
-| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                     |
-| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                           |
-| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                  |
-| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                               |
-| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads: a good link serves the file, a tampered or expired one is refused                                                                          |
-| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                      |
-| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                           |
-| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                     |
+| File                                                                                       | What it proves                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to her own locations; removing her ends her session now                                                |
+| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number               |
+| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                           |
+| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                   |
+| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                         |
+| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                |
+| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                             |
+| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads: a good link serves the file, a tampered or expired one is refused                                                                                        |
+| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                    |
+| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry |
+| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                         |
+| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                                   |
