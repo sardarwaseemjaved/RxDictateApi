@@ -8,6 +8,13 @@ import { dateStringSchema, objectIdSchema, phoneSchema, sexSchema } from './comm
  */
 export const allergiesSchema = z.array(z.string().trim().min(1).max(60)).max(20);
 
+/**
+ * Known conditions - "Diabetes", "Hypertension". The same shape as allergies
+ * and for the same reason: a short list somebody types at a desk, not a
+ * problem list with codes and dates.
+ */
+export const conditionsSchema = z.array(z.string().trim().min(1).max(60)).max(20);
+
 /** `MR-10001`. Human readable, unique within a practice, never reused. */
 export const mrNoSchema = z.string().regex(/^MR-\d+$/);
 
@@ -28,6 +35,13 @@ export const patientViewSchema = z.object({
    * prescription that distinction matters.
    */
   noKnownAllergies: z.boolean(),
+  conditions: conditionsSchema,
+  /**
+   * The day this patient was last on a list, which the patients screen shows
+   * as "Today", "Yesterday" or a date. Derived from their visits and
+   * maintained by the server; read-only.
+   */
+  lastVisitDate: dateStringSchema.nullable(),
 });
 export type PatientView = z.infer<typeof patientViewSchema>;
 
@@ -44,6 +58,7 @@ export const createPatientBodySchema = z
     sex: sexSchema,
     allergies: allergiesSchema.default([]),
     noKnownAllergies: z.boolean().default(false),
+    conditions: conditionsSchema.default([]),
   })
   .refine((body) => body.dob !== undefined || body.age !== undefined, 'either dob or age is required')
   .refine(
@@ -61,6 +76,7 @@ export const updatePatientBodySchema = z
     sex: sexSchema.optional(),
     allergies: allergiesSchema.optional(),
     noKnownAllergies: z.boolean().optional(),
+    conditions: conditionsSchema.optional(),
   })
   .refine((body) => Object.keys(body).length > 0, 'nothing to change')
   .refine(
@@ -77,9 +93,50 @@ export type UpdatePatientBody = z.infer<typeof updatePatientBodySchema>;
  * case) or the start of a phone number. A bare number is tried as both an MR
  * number and a phone prefix, because at the desk it could be either.
  */
+/** A query-string boolean, where everything arrives as text. */
+const flag = z
+  .enum(['true', 'false'])
+  .default('false')
+  .transform((value) => value === 'true');
+
+export const patientSortSchema = z.enum(['name', 'lastVisit']);
+export type PatientSort = z.infer<typeof patientSortSchema>;
+
 export const searchPatientsQuerySchema = z.object({
   q: z.string().trim().max(160).optional(),
+  /** `name` stays the default; the patients screen asks for `lastVisit`. */
+  sort: patientSortSchema.default('name'),
+  /**
+   * An approved follow-up whose date has passed, with no visit since. The
+   * patient the doctor meant to see again and has not.
+   */
+  followUpDue: flag,
+  /** A report nobody has marked reviewed yet. */
+  newReports: flag,
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 export type SearchPatientsQuery = z.infer<typeof searchPatientsQuerySchema>;
+
+/**
+ * The chip counts above the patients list.
+ *
+ * Counted on every list rather than asked for separately, because a chip that
+ * says "Follow-up due" with no number is a chip nobody taps. `all` ignores the
+ * filters so the "All" chip can show the practice's total while a filter is on.
+ */
+export const patientCountsSchema = z.object({
+  all: z.number().int().min(0),
+  followUpDue: z.number().int().min(0),
+  newReports: z.number().int().min(0),
+});
+export type PatientCounts = z.infer<typeof patientCountsSchema>;
+
+export const patientListMetaSchema = z.object({
+  page: z.number().int(),
+  limit: z.number().int(),
+  total: z.number().int(),
+  totalPages: z.number().int(),
+  counts: patientCountsSchema,
+});
+export type PatientListMeta = z.infer<typeof patientListMetaSchema>;

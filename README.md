@@ -212,6 +212,22 @@ what "went in 6 min ago" counts from, and it moves on a status change and not
 on any other edit. `vitalsRecordedAt` is how the queue knows to offer "Add
 vitals" or report "Vitals done".
 
+**The patients list.** Patients carry `conditions` alongside `allergies`, and a
+read-only `lastVisitDate` the screen shows as "Today", "Yesterday" or a date.
+That date is derived from the visits but kept on the patient, because the list
+sorts by it (`sort=lastVisit`; `name` is still the default) and a sort cannot
+reach into another collection without an aggregation that paging then has to
+fight. It is maintained in one place with a `$max`, so a backdated visit cannot
+pull it backwards.
+
+Two filters back the design's chips, and `meta.counts` carries their totals on
+every list so a chip never shows a blank number: `followUpDue=true` is an
+approved follow-up whose date has passed with no visit since, worked out from
+the prescriptions rather than stored so it cannot go stale, and
+`newReports=true` is a report nobody has marked reviewed. Both at once means
+both. The counts ignore `q` and the active filter, because that is what a chip
+count means.
+
 **Registering a patient.** Every patient gets an `mrNo` like `MR-10001`,
 sequential within a practice from an atomic `$inc` on `practice.mrCounter`.
 Search matches a name, an MR number (with or without the prefix, in any case)
@@ -350,6 +366,14 @@ reasons: a bad op halfway through would otherwise leave a prescription half
 edited, and this is the gate rule 6 rests on. An op that names a section that does
 not take it, invents a field, or addresses an item that is not there comes back as
 `OP_INVALID`.
+
+**The visit follows the prescription.** A doctor working alone never touches
+the queue. `POST /prescriptions` with no `visitId` puts the patient on today's
+list at the active location - finding the visit they are already on, token and
+all - and attaches the draft to it. Starting a prescription moves a `waiting`
+visit to `with_doctor`; approving one moves it to `done`. On the server rather
+than in the app, so every client does it and it cannot half happen because a
+second request was lost.
 
 **Starting one.** `POST /prescriptions` with a `visitId` returns the draft that
 visit already has rather than opening a second — 200 for the existing one, 201
@@ -514,5 +538,6 @@ The suites that exist to hold the six rules down:
 | [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                  |
 | [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                               |
 | [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads: a good link serves the file, a tampered or expired one is refused                                                                          |
+| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                      |
 | [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                           |
 | [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                     |

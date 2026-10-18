@@ -11,6 +11,7 @@ import {
   VoiceSession,
   type IPrescription,
   type PrescriptionDoc,
+  type VisitDoc,
 } from '../models';
 import { BaseRepository, type Scope } from '../core/db';
 import { AppError } from '../core/errors';
@@ -32,6 +33,7 @@ import { applyOps, isEmpty, wireSections } from './prescriptionOps.service';
 import { nextPrescriptionNumber } from './counter.service';
 import { findOrCreateDrug } from './drug.service';
 import { renderPrescription, renderPreview } from './pdf.service';
+import { changeVisitStatus, ensureVisit } from './visit.service';
 
 const prescriptions = new BaseRepository<IPrescription>(Prescription, { locationScoped: true });
 
@@ -155,6 +157,12 @@ export const getPrescription = async (scope: Scope, id: string) => {
  * comes back untouched, the same way adding a patient to today's list twice
  * returns the visit they are already on. `created` tells the controller
  * whether to answer 201 or 200.
+ *
+ * With no visitId, the patient is put on today's list here. A doctor working
+ * alone should not have to think about a queue: writing a prescription is what
+ * says the consultation is happening, and the visit it needs is created or
+ * found by that act. The visit then moves from waiting to with_doctor, because
+ * that is what has just become true.
  */
 export const createPrescription = async (
   scope: Scope,
@@ -165,24 +173,31 @@ export const createPrescription = async (
     throw AppError.notFound('Patient');
   }
 
-  let visit = null;
+  let visit: VisitDoc | null = null;
   if (body.visitId) {
     visit = await Visit.findOne({ _id: body.visitId, practiceId: scope.practiceId, deletedAt: null });
     if (!visit) {
       throw AppError.notFound('Visit');
     }
+  } else {
+    // The find-or-create: a patient seen earlier today keeps the visit and the
+    // token they already have.
+    visit = (await ensureVisit(scope, patient)).visit;
+  }
 
-    const open = await prescriptions.findOne(scope, { visitId: visit._id, status: 'draft' });
-    if (open) {
-      return { prescription: toPrescriptionView(open), created: false };
-    }
+  const open = await prescriptions.findOne(scope, { visitId: visit._id, status: 'draft' });
+  if (open) {
+    // The consultation is starting, whether this call opened the draft or
+    // found it.
+    await changeVisitStatus(scope, visit, 'with_doctor');
+    return { prescription: toPrescriptionView(open), created: false };
   }
 
   let prescription: PrescriptionDoc;
   try {
     prescription = await prescriptions.create(scope, {
       patientId: patient._id,
-      visitId: visit ? visit._id : null,
+      visitId: visit._id,
       doctorId: scope.actorId,
       status: 'draft',
       source: body.source,
@@ -194,10 +209,11 @@ export const createPrescription = async (
     // The read above and this write are not one operation, so two devices can
     // both get past it. The unique index is what actually decides, and the
     // one that loses reads back the draft the winner made.
-    if ((error as { code?: number }).code === 11000 && visit) {
-      const open = await prescriptions.findOne(scope, { visitId: visit._id, status: 'draft' });
-      if (open) {
-        return { prescription: toPrescriptionView(open), created: false };
+    if ((error as { code?: number }).code === 11000) {
+      const winner = await prescriptions.findOne(scope, { visitId: visit._id, status: 'draft' });
+      if (winner) {
+        await changeVisitStatus(scope, visit, 'with_doctor');
+        return { prescription: toPrescriptionView(winner), created: false };
       }
     }
     throw error;
@@ -212,7 +228,7 @@ export const createPrescription = async (
    * other change, and only ever at creation: an existing draft above returns
    * before this runs, so a later edit is never overwritten.
    */
-  if (visit) {
+  {
     const vitals = await Vital.findOne({ visitId: visit._id, practiceId: scope.practiceId, deletedAt: null });
     const complaints = vitals?.complaints?.trim();
     if (complaints) {
@@ -226,6 +242,9 @@ export const createPrescription = async (
       await prescription.save();
     }
   }
+
+  // The patient is with the doctor now.
+  await changeVisitStatus(scope, visit, 'with_doctor');
 
   const after = toPrescriptionView(prescription);
   await writeAudit(scope, { action: 'prescription.create', entity: 'prescription', entityId: prescription._id, after });
@@ -400,6 +419,22 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
     }
   }
 
+  /**
+   * Signing the prescription is the end of the consultation, so the visit is
+   * done. On the server rather than in the app, so it happens for every client
+   * and cannot half happen because a second request was lost.
+   */
+  if (prescription.visitId) {
+    const visit = await Visit.findOne({
+      _id: prescription.visitId,
+      practiceId: scope.practiceId,
+      deletedAt: null,
+    });
+    if (visit) {
+      await changeVisitStatus(scope, visit, 'done');
+    }
+  }
+
   const after = toPrescriptionView(prescription);
   await writeAudit(scope, {
     action: 'prescription.approve',
@@ -466,9 +501,9 @@ export const revisePrescription = async (scope: Scope, id: string, body: ReviseP
     });
   } catch (error) {
     if ((error as { code?: number }).code === 11000) {
-      const open = await prescriptions.findOne(scope, { previousVersionId: previous._id, status: 'draft' });
+      const winner = await prescriptions.findOne(scope, { previousVersionId: previous._id, status: 'draft' });
       throw new AppError('CONFLICT', 'This prescription is already being revised.', {
-        ...(open ? { revisionId: String(open._id) } : {}),
+        ...(winner ? { revisionId: String(winner._id) } : {}),
       });
     }
     throw error;

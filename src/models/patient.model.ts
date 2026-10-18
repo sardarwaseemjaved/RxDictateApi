@@ -22,6 +22,17 @@ export interface IPatient {
   allergies: string[];
   /** Asked and none, as opposed to never asked. An empty list cannot say which. */
   noKnownAllergies: boolean;
+  conditions: string[];
+  /**
+   * The Karachi day of this patient's most recent visit, `YYYY-MM-DD`.
+   *
+   * Derived from the visits collection and kept here on purpose: the patients
+   * list sorts by it, and a sort cannot reach into another collection without
+   * an aggregation that paging then has to fight. Maintained in one place, by
+   * visit.service, with a $max so a visit backdated by the PA cannot pull it
+   * backwards.
+   */
+  lastVisitDate: string | null;
   addedBy: Types.ObjectId;
   createdBy: Types.ObjectId;
   deletedAt: Date | null;
@@ -42,6 +53,8 @@ const patientSchema = new Schema<IPatient>(
     sex: { type: String, enum: ['male', 'female', 'other'], required: true },
     allergies: { type: [String], default: [] },
     noKnownAllergies: { type: Boolean, default: false },
+    conditions: { type: [String], default: [] },
+    lastVisitDate: { type: String, default: null },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     deletedAt: { type: Date, default: null },
@@ -54,6 +67,8 @@ patientSchema.plugin(paginate);
 
 patientSchema.index({ practiceId: 1, phone: 1 });
 patientSchema.index({ practiceId: 1, mrNo: 1 }, { unique: true });
+// The patients screen's default order once it asks for it.
+patientSchema.index({ practiceId: 1, lastVisitDate: -1 });
 // A compound text index: the practiceId prefix has to be matched by equality,
 // which is exactly how every search runs, and keeps one clinic's names out of
 // another's results.

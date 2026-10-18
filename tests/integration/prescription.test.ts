@@ -198,10 +198,21 @@ describe('Prescriptions', () => {
     });
 
     test('numbers come from an atomic counter, so concurrent approvals never collide', async () => {
-      const { doctor, patientId } = await aClinic('+923002220007');
+      const { doctor } = await aClinic('+923002220007');
       const headers = headersFor(doctor, { location: true });
 
-      const drafts = await Promise.all([1, 2, 3, 4, 5].map(() => aDraft(doctor, patientId)));
+      // Five different patients: one patient has one visit a day and so one
+      // open draft, which is the point of the test above this one.
+      const drafts = await Promise.all(
+        [1, 2, 3, 4, 5].map(async (n) => {
+          const patient = await request(app)
+            .post('/api/v1/patients')
+            .set(headersFor(doctor))
+            .send({ name: `Concurrent ${n}`, age: 30, sex: 'male' })
+            .expect(201);
+          return aDraft(doctor, patient.body.data.id);
+        }),
+      );
       await Promise.all(
         drafts.map((draft) =>
           request(app).patch(`/api/v1/prescriptions/${draft.id}`).set(headers).send(addMedicine('Brufen')).expect(200),
@@ -427,13 +438,24 @@ describe('Prescriptions', () => {
       expect(next.body.data.id).not.toBe(first.body.data.id);
     });
 
-    test('without a visit, every create is a new draft', async () => {
+    /**
+     * A doctor working alone never asks for a visit. The server makes one, so
+     * the second tap finds the same consultation rather than starting a
+     * parallel one.
+     */
+    test('with no visitId the patient is put on today list, and a second create finds that draft', async () => {
       const { doctor, patientId } = await aClinic('+923002220023');
       const headers = headersFor(doctor, { location: true });
 
-      const a = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
-      const b = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
-      expect(a.body.data.id).not.toBe(b.body.data.id);
+      const first = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
+      expect(first.body.data.visitId).not.toBeNull();
+
+      const second = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(200);
+      expect(second.body.data.id).toBe(first.body.data.id);
+
+      const queue = await request(app).get('/api/v1/visits').set(headers).expect(200);
+      expect(queue.body.data).toHaveLength(1);
+      expect(queue.body.data[0].id).toBe(first.body.data.visitId);
     });
   });
 
