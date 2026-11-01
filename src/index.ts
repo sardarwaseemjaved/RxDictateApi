@@ -6,6 +6,8 @@ import logger from './config/logger';
 import { syncCollections } from './models';
 import { sweepExpiredAudio, sweepStalledSegments } from './services/voice.service';
 import { markExpiredSessions } from './services/session.service';
+import { backfillQueuePositions } from './services/visit.service';
+import { backfillPatientLocations } from './services/patient.service';
 
 let server: Server | undefined;
 
@@ -44,10 +46,27 @@ const startSweeps = (): void => {
 const start = async (): Promise<void> => {
   await mongoose.connect(config.mongoose.url);
   logger.info('Connected to MongoDB');
+  logger.info(
+    `Voice configuration: stt=${config.voice.sttProvider} (${config.openai.sttModel}), ` +
+      `llm=${config.voice.llmProvider} (${config.openai.model}), timeoutMs=${config.voice.segmentTimeoutMs}`,
+  );
 
   // Every collection and index exists from the first boot, including the ones
   // no route touches yet.
   await syncCollections();
+
+  // Before the first request, so no list is ever read without its order.
+  const backfilled = await backfillQueuePositions();
+  if (backfilled > 0) {
+    logger.info(`gave ${backfilled} visit(s) a queue position from their token`);
+  }
+
+  // Also before the first request: until it has run, an assistant would see
+  // none of the patients registered before patients had locations.
+  const linked = await backfillPatientLocations();
+  if (linked > 0) {
+    logger.info(`linked ${linked} patient(s) to the locations they were seen at`);
+  }
 
   if (config.otp.fixedCode) {
     logger.warn(`every sign-in code is fixed to ${config.otp.fixedCode} - testing only; this is ignored in production`);

@@ -5,3 +5,4 @@ export const createUpload = { body: createUploadBodySchema };
 export const createReport = { params: idParamSchema, body: createReportBodySchema };
 export const listReports = { params: idParamSchema, query: listReportsQuerySchema };
 export const getReport = { params: idParamSchema };
+export const reviewReport = { params: idParamSchema };

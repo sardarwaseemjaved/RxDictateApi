@@ -13,8 +13,14 @@ import { visitStatusSchema } from './visit.schema';
  * in order. Four lists would make the app merge and sort them, and get a
  * different answer from the server about what "newest" means.
  *
- * Settled now and served later: GET /patients/:id/history still answers 501,
- * so the app can be written against these shapes while the endpoint is built.
+ * `at` is when the item reached the record - a visit or prescription when it
+ * was started, a lab when it was ordered, a report when it was uploaded - and
+ * is what the timeline is sorted by. A report's `testDate` and a visit's
+ * `date` say when the thing itself happened, which can be earlier.
+ *
+ * Labs are the tests an approved prescription ordered, one per line of its
+ * labs section, recorded when it is approved. Revising the prescription
+ * replaces the ones that have no result yet.
  */
 export const historyVisitSchema = z.object({
   kind: z.literal('visit'),

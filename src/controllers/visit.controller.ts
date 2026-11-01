@@ -3,7 +3,7 @@ import * as visitService from '../services/visit.service';
 import catchAsync from '../utils/catchAsync';
 import { parsedQuery } from '../utils/request';
 import { sendCreated, sendData } from '../utils/response';
-import type { CreateVisitBody, ListVisitsQuery, UpdateVisitBody } from '../shared/visit.schema';
+import type { CreateVisitBody, ListVisitsQuery, MoveVisitBody, UpdateVisitBody } from '../shared/visit.schema';
 
 export const listVisits = catchAsync(async (req, res) => {
   sendData(res, await visitService.listVisits(scopeFrom(req), parsedQuery<ListVisitsQuery>(req)));
@@ -15,4 +15,8 @@ export const createVisit = catchAsync(async (req, res) => {
 
 export const updateVisit = catchAsync(async (req, res) => {
   sendData(res, await visitService.updateVisit(scopeFrom(req), req.params.id, req.body as UpdateVisitBody));
+});
+
+export const moveVisit = catchAsync(async (req, res) => {
+  sendData(res, await visitService.moveVisit(scopeFrom(req), req.params.id, req.body as MoveVisitBody));
 });

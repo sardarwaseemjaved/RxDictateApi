@@ -6,6 +6,7 @@ import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
 import type {
   AppointmentCountsByDay,
+  AppointmentStatus,
   AppointmentView,
   CreateAppointmentBody,
   FollowUpView,
@@ -14,7 +15,7 @@ import type {
 } from '../shared/appointment.schema';
 import type { PageMeta } from '../shared/response';
 import { addDays, karachiDay, karachiDayRange, todayInKarachi } from '../utils/time';
-import { toPatientView } from './patient.service';
+import { findPatientOrFail, linkPatient, toPatientView } from './patient.service';
 
 const appointments = new BaseRepository<IAppointment>(Appointment, { locationScoped: true });
 
@@ -37,7 +38,15 @@ const withPatients = async (found: AppointmentDoc[]): Promise<AppointmentView[]>
 };
 
 /**
- * The booked appointments between two Karachi days, inclusive.
+ * A booking that still stands: booked, or kept. Both are on the Schedule and
+ * both mean a follow-up has been booked; only a cancellation takes one off.
+ */
+const STANDING: AppointmentStatus[] = ['booked', 'arrived'];
+
+/**
+ * The standing appointments between two Karachi days, inclusive - the ones
+ * still booked and the ones the patient has arrived for, so the Schedule
+ * shows who came.
  *
  * `countsByDay` is over the same range and is what the seven-day strip above
  * the list renders, so it is counted here rather than by the app paging
@@ -50,7 +59,11 @@ export const listAppointments = async (
   const { start } = karachiDayRange(query.from);
   const { end } = karachiDayRange(query.to);
 
-  const found = await appointments.find(scope, { at: { $gte: start, $lt: end }, status: 'booked' }, { sort: { at: 1 } });
+  const found = await appointments.find(
+    scope,
+    { at: { $gte: start, $lt: end }, status: { $in: STANDING } },
+    { sort: { at: 1 } },
+  );
 
   const countsByDay: AppointmentCountsByDay = {};
   found.forEach((appointment) => {
@@ -62,10 +75,7 @@ export const listAppointments = async (
 };
 
 export const createAppointment = async (scope: Scope, body: CreateAppointmentBody): Promise<AppointmentView> => {
-  const patient = await Patient.findOne({ _id: body.patientId, practiceId: scope.practiceId, deletedAt: null });
-  if (!patient) {
-    throw AppError.notFound('Patient');
-  }
+  const patient = await findPatientOrFail(scope, body.patientId);
 
   if (body.prescriptionId) {
     const prescription = await Prescription.findOne({
@@ -88,6 +98,8 @@ export const createAppointment = async (scope: Scope, body: CreateAppointmentBod
       prescriptionId: body.prescriptionId ? new Types.ObjectId(body.prescriptionId) : null,
       cancelledAt: null,
     });
+    // Booked here means seen here, as far as who may find them goes.
+    await linkPatient(scope.practiceId, patient._id, appointment.locationId);
 
     const after = toAppointmentView(appointment, patient);
     await writeAudit(scope, {
@@ -175,10 +187,11 @@ export const listFollowUps = async (
     'sections.followUp.bookByAssistant': { $ne: false },
   }).sort({ approvedAt: -1 });
 
-  // One query rather than one per prescription.
+  // One query rather than one per prescription. A booking the patient has
+  // arrived for still booked the follow-up, so it does not come back here.
   const booked = await Appointment.find({
     practiceId: scope.practiceId,
-    status: 'booked',
+    status: { $in: STANDING },
     prescriptionId: { $in: prescriptions.map((prescription) => prescription._id) },
   }).select('prescriptionId');
   const bookedFor = new Set(booked.map((appointment) => String(appointment.prescriptionId)));

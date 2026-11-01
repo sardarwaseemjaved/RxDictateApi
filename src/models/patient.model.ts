@@ -3,8 +3,10 @@ import { paginate, toJSON, type PaginateModel } from './plugins';
 import type { Sex } from '../shared/common';
 
 /**
- * Practice-wide on purpose: a patient first seen at one location must be
- * findable at another without being typed in twice.
+ * One record per person per practice, however many locations they are seen at,
+ * so their history is never split across two files. Which locations they are
+ * linked to is `locationIds`, and that is what decides which assistants see
+ * them.
  *
  * Most patients do not know their date of birth, so `age` is stored as typed
  * when there is no `dob`. When there is one, age is derived from it on read.
@@ -33,6 +35,14 @@ export interface IPatient {
    * backwards.
    */
   lastVisitDate: string | null;
+  /**
+   * The locations this patient belongs to: where they were registered, and
+   * every location they have had a visit or an appointment at. Only ever
+   * added to. An assistant sees the patients linked to a location they work
+   * at; the doctor sees the whole practice. Read through patient.service's
+   * finder, never filtered by hand.
+   */
+  locationIds: Types.ObjectId[];
   addedBy: Types.ObjectId;
   createdBy: Types.ObjectId;
   deletedAt: Date | null;
@@ -55,6 +65,7 @@ const patientSchema = new Schema<IPatient>(
     noKnownAllergies: { type: Boolean, default: false },
     conditions: { type: [String], default: [] },
     lastVisitDate: { type: String, default: null },
+    locationIds: { type: [{ type: Schema.Types.ObjectId, ref: 'Location' }], default: [] },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     deletedAt: { type: Date, default: null },
@@ -66,6 +77,8 @@ patientSchema.plugin(toJSON);
 patientSchema.plugin(paginate);
 
 patientSchema.index({ practiceId: 1, phone: 1 });
+// An assistant's list: the patients linked to any of their locations.
+patientSchema.index({ practiceId: 1, locationIds: 1 });
 patientSchema.index({ practiceId: 1, mrNo: 1 }, { unique: true });
 // The patients screen's default order once it asks for it.
 patientSchema.index({ practiceId: 1, lastVisitDate: -1 });

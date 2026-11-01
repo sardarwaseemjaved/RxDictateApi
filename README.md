@@ -15,7 +15,7 @@ Three actors:
 
 Built for one doctor today. Every record is scoped to a _practice_, so the same
 code serves a doctor with two locations, or a clinic with several doctors, without
-a migration. The UI never says "practice": to the doctor it is his clinic.
+a migration. The UI never says "practice": to the doctor it is their clinic.
 
 ## Six rules the code is built around
 
@@ -62,6 +62,8 @@ yarn docker:prod
 yarn docker:test
 ```
 
+Deploying to a server: [deploy/README.md](deploy/README.md).
+
 ### Environment
 
 Copy `.env.example`. Everything is validated by zod at boot in
@@ -71,6 +73,7 @@ letting a missing variable become a runtime surprise. The full set:
 | Variable                                    | Default                     | Notes                                                            |
 | ------------------------------------------- | --------------------------- | ---------------------------------------------------------------- |
 | `PORT`                                      | `3000`                      |                                                                  |
+| `TRUST_PROXY`                               | `0`                         | proxies in front of the API; `1` behind nginx                    |
 | `MONGODB_URL`                               | —                           | required; `-test` is appended when `NODE_ENV=test`               |
 | `JWT_SECRET`                                | —                           | required, at least 16 characters                                 |
 | `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`                        |                                                                  |
@@ -79,7 +82,7 @@ letting a missing variable become a runtime surprise. The full set:
 | `OTP_MAX_ATTEMPTS`                          | `5`                         | wrong guesses before the code is burned                          |
 | `OTP_COOLDOWN_SECONDS`                      | `60`                        | per phone number, survives a restart                             |
 | `OTP_LOG_IN_DEV`                            | `true`                      | outside production, return the code as `devCode`                 |
-| `CORS_ORIGINS`                              | dev localhosts              | comma separated; **required in production**                      |
+| `CORS_ORIGINS`                              | dev localhosts              | **required in production**; must list the web app — see below    |
 | `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                        |                                                                  |
 | `RATE_LIMIT_MAX`                            | `300`                       | the whole API                                                    |
 | `AUTH_RATE_LIMIT_MAX`                       | `20`                        | sign-in                                                          |
@@ -103,6 +106,37 @@ letting a missing variable become a runtime surprise. The full set:
 | `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`                     | a stalled segment is failed, not left hanging                    |
 | `PDF_RENDERER_URL`                          | —                           | an HTML-to-PDF service; without one the print file is HTML       |
 | `AUDIO_RETENTION_DAYS`                      | `30`                        | default for a new practice, days after approval                  |
+
+**`CORS_ORIGINS` and the web app.** Comma separated. Setting it **replaces** the
+dev defaults (`http://localhost:3000`, `:5173`, `:8081`, `:19006`) rather than
+adding to them. The web app calls this API from the browser, and with the local
+storage driver it also PUTs report pages straight to `PUBLIC_API_URL`, so the
+web app's address must be on the list. In dev that is `http://localhost:5173`:
+a `.env` that sets `CORS_ORIGINS` has to include it itself. The native app
+sends no `Origin` and is never affected.
+
+**Bucket CORS, for production.** With `STORAGE_DRIVER=s3` the browser PUTs
+report pages straight to the bucket. That request is cross-origin, and the
+bucket refuses it unless its own CORS rules allow it — without this rule every
+browser upload fails before it reaches the API, while the phone app (which
+sends no `Origin`) carries on working, which makes it easy to miss.
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://app.example.com"],
+    "AllowedMethods": ["PUT", "GET"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+`AllowedOrigins` is the web app's addresses. On R2 the rule goes in the
+bucket's **Settings → CORS policy**; on S3, in the bucket's **Permissions →
+Cross-origin resource sharing**, or `aws s3api put-bucket-cors` with the array
+wrapped as `{ "CORSRules": [...] }`.
 
 ## Layout
 
@@ -193,14 +227,23 @@ practice ids exist. Visits, prescriptions and voice also need `X-Location-Id`.
 | locations     | `GET`/`POST /locations`, `PATCH /locations/:id`, `POST /locations/:id/archive`                                                                                                               | doctor                            |
 | team          | `GET`/`POST /members`, `PATCH /members/:id`, `DELETE /members/:id`                                                                                                                           | doctor                            |
 | patients      | `GET /patients?q=`, `POST /patients`, `GET`/`PATCH /patients/:id`                                                                                                                            | doctor, PA                        |
-| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`                                                                                                                                | doctor, PA                        |
+| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`, `POST /visits/:id/move`                                                                                                       | doctor, PA                        |
 | prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/preview`, `GET /prescriptions/:id/pdf` | doctor (PA: read + preview + pdf) |
 | voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                                                  | doctor                            |
 | drugs         | `GET /drugs?q=`                                                                                                                                                                              | doctor                            |
+| history       | `GET /patients/:id/history?kind=`                                                                                                                                                            | doctor                            |
+| reports       | `POST /reports/uploads`, `POST`/`GET /patients/:id/reports`, `GET /reports/:id`                                                                                                              | doctor, PA                        |
+| reports       | `POST /reports/:id/review`                                                                                                                                                                   | doctor                            |
+| templates     | `GET`/`POST /templates`, `GET`/`PATCH`/`DELETE /templates/:id`, `POST /prescriptions/from-template/:id`                                                                                      | doctor                            |
+| files         | `GET`/`PUT /files/<key>?…&sig=` — local storage driver only                                                                                                                                  | whoever holds the signed link     |
+
+`GET /prescriptions` takes `from`, `to` (Karachi days, inclusive) and `q` (a
+patient's name, phone or MR number, matched as patient search matches them), and
+each row carries `patient: { id, name, age, sex, mrNo }` so a list of every
+prescription needs no request per row. The single read does not.
 
 Mounted and answering **501**, so the app can link to them and nothing is renamed
-when they go live: `/devices`, `/templates`, `/patients/:id/history`,
-`/portal/*`, `/prescriptions/from-template/:id`.
+when they go live: `/devices`, `/portal/*`.
 
 In development, `GET /api/v1/docs` serves the OpenAPI document.
 
@@ -216,6 +259,40 @@ whoever is holding that slip has already heard it called. `statusChangedAt` is
 what "went in 6 min ago" counts from, and it moves on a status change and not
 on any other edit. `vitalsRecordedAt` is how the queue knows to offer "Add
 vitals" or report "Vitals done".
+
+**The order of the list.** The assistant calls patients in, so the assistant
+decides who goes next, and the doctor's screens show the same order.
+`POST /visits/:id/move` with `{ before }` puts a waiting visit just before
+another waiting visit, or after every other waiting one when `before` is null,
+and `GET /visits` returns the day by `queuePosition`, then token. The token never
+changes: a number out of sequence is how the room can tell the list was
+rearranged. A new visit starts at its token, and no move puts a visit at or past
+the next token, so the newest is always last. A move writes one row, halfway
+between its new neighbours, and renumbers the day only when no number fits
+between them. Two moves of the same list take turns on a short lease in
+`counters` in place of a transaction, which a standalone mongod cannot open.
+Visits from before the field existed get their token as their position at boot.
+
+**Whose patients.** A patient belongs to the clinic and is linked to locations:
+where they were registered (`X-Location-Id` on `POST /patients`; without one, an
+assistant's own locations or the doctor's default location), and every location
+they have a visit or an appointment at. Links are only ever added. The doctor
+sees every patient. An assistant sees the ones linked to a location they work
+at - in search, the list, its totals and its counts, and by id - and anyone else
+is `NOT_FOUND`, never `FORBIDDEN`, because whether they exist is not that
+assistant's business. Every service reaches a patient through `findPatient` in
+[patient.service.ts](src/services/patient.service.ts), so the rule lives in one
+place. The lists of visits, appointments, follow-ups and prescriptions are already
+held to a location, and each of those records links its patient there when it is
+made. The one way across is a whole phone number: an assistant who types it finds
+the patient wherever they were registered, and for 30 minutes may open them and
+add them to the list or book them at their own location, which links them there
+instead of registering the same person twice (`patientIntroductions` keeps that
+half hour). Locations are read from the membership on every request, so taking
+one away hides its patients at once. Patients from before links existed are
+linked at boot from their visits, appointments and prescriptions; one an
+assistant registered also gets that assistant's locations, and one linked
+nowhere goes to the default location.
 
 **The patients list.** Patients carry `conditions` alongside `allergies`, and a
 read-only `lastVisitDate` the screen shows as "Today", "Yesterday" or a date.
@@ -256,8 +333,22 @@ would be worse than either being slightly wrong.
 several megabytes and should not pass through a request handler. `POST
 /reports/uploads` hands back a presigned PUT; `POST /patients/:id/reports`
 records what landed. A key issued to another clinic is refused. With the local
-storage driver there is nothing to sign against, so step one answers
-`STORAGE_UNAVAILABLE` and says to set `STORAGE_DRIVER=s3`.
+storage driver the API stands in for the bucket: the upload URL is its own
+`PUT /api/v1/files/<key>?expires=&ct=&size=&sig=`, HMAC'd over the key, the
+expiry, the content type and the declared size. It refuses an expired or
+altered link (`FORBIDDEN`), a body sent with a different `Content-Type` or
+larger than the signed size (`VALIDATION_ERROR`, checked against
+`Content-Length` before a byte is read), and answers like a bucket — 200 and an
+`ETag` — so the app does not need to know which it uploaded to. A download link
+cannot be turned into an upload link: the two are signed over different
+strings. Browser uploads need CORS on the bucket in production; see
+**Environment**.
+
+`POST /reports/:id/review` is the doctor marking a report looked at. It sets
+`reviewedAt` and `reviewedBy`, which is what takes the report out of "New" and
+the patient out of `newReports=true`. Reviewing again keeps the first time, and
+a filter on `reviewedAt: null` makes that hold when two devices tap at once. It
+is audited and tells nobody.
 
 **Being added.** When the doctor adds a number, that person gets a text —
 "Dr. Ayesha Khan added you to Shifa Clinic. Install the clinic app and sign in
@@ -276,23 +367,88 @@ prescription whose `followUp` has a date, with no booked appointment pointing
 back at it. Booking one with its `prescriptionId` is what takes it off the
 list, so there is no second list to keep in step.
 
+A booking becomes `arrived` when a visit is created for that patient on its day
+at its location — by the assistant adding them to the list, or by the doctor
+starting a prescription, which does the same. The Schedule lists `booked` and
+`arrived` together, so it shows who came, and an arrived follow-up stays off
+the to-book list. Nothing makes a visit from an appointment. This is not a
+transaction: nothing here uses one and the standalone mongod of dev and the
+tests cannot. The visit is written first, so a failure in between leaves a
+patient on the list whose booking still says booked, rather than an arrival
+nobody registered.
+
+`appointment.booked` goes to the assistants who work at that location, leaving
+out whoever made the booking. Not to the doctor, who has no schedule page for it
+to open.
+
+## Patient history
+
+`GET /patients/:id/history` is one column, newest first: visits with their
+vitals, prescriptions (every status but `cancelled`), labs and reports, shaped
+by [src/shared/history.schema.ts](src/shared/history.schema.ts). `kind=` narrows
+it to one. Practice-wide, like the doctor's search, because a patient seen at two
+locations has one history, and the doctor's alone.
+
+The merge and the paging are done by the database: each collection contributes
+its ids and `at` to a `$unionWith`, the union is sorted and one page is cut, and
+only that page is read in full. `at` is when the item reached the record; a
+report's `testDate` and a visit's `date` say when the thing itself happened.
+
+Labs are the tests an approved prescription ordered: approving one writes a
+`labs` row per line of its labs section, with an empty `result`. Approving a
+revision retires the previous version's rows that have no result or file yet
+and writes its own, so a re-ordered test is not listed twice and a test with a
+result is never lost. Prescriptions approved before this went in have no rows.
+
+## Rx templates
+
+A template is a saved set of the same sections a prescription carries, so
+applying one is a copy. It belongs to the doctor who made it: two doctors at
+one clinic each keep their own, and another doctor's template is a 404. A
+template is a prescribing habit, and a colleague's regimen should not turn up
+on a page this doctor signs.
+
+Whichever way one is made, it keeps the follow-up's interval and drops its
+date, and drops every flag, `correctedBySpeech` and source span — a flag carried
+into a template would block approval of every prescription started from it.
+"Save as template" (`fromPrescriptionId`) copies an approved prescription and
+leaves its complaints, history and examination behind, because those describe
+the patient it was written for. Names are unique per doctor in any case.
+
+`POST /prescriptions/from-template/:id` with `{ patientId, visitId? }` finds the
+visit as `POST /prescriptions` does. With no open draft it makes one, `source:
+'template'`, 201. With one, it adds the template's lines to it, 200: a line the
+draft already has is skipped rather than doubled, the follow-up is taken only
+when the draft has none, and nothing is removed. The lines go through the ops
+engine, so they are validated and get fresh ids, with their own origin so they
+do not count as the doctor correcting the dictation. Each use adds one to
+`useCount` and sets `lastUsedAt`, without moving `updatedAt`. The list is most
+used first.
+
+`practice.features.templates` is not enforced: neither app reads it, and its
+default of `false` would switch templates off for every clinic.
+
 ## Permissions
 
-| Action                                            | Doctor                       | PA                 |
-| ------------------------------------------------- | ---------------------------- | ------------------ |
-| add / edit patient                                | yes                          | yes                |
-| search patients                                   | yes                          | yes                |
-| see today's list                                  | any location of his practice | her locations only |
-| create / edit / approve prescription              | yes                          | **no**             |
-| view / print approved prescription                | yes                          | her locations only |
-| voice dictation                                   | yes                          | **no**             |
-| add / remove PA, assign locations                 | yes                          | no                 |
-| add / edit / archive locations, practice settings | yes                          | no                 |
+| Action                                            | Doctor                         | PA                      |
+| ------------------------------------------------- | ------------------------------ | ----------------------- |
+| add / edit patient                                | yes                            | yes                     |
+| search patients                                   | yes                            | yes                     |
+| a patient's history                               | yes                            | **no**                  |
+| see today's list                                  | any location of their practice | assigned locations only |
+| create / edit / approve prescription              | yes                            | **no**                  |
+| view / print approved prescription                | yes                            | assigned locations only |
+| voice dictation                                   | yes                            | **no**                  |
+| file a report                                     | yes                            | yes                     |
+| mark a report reviewed                            | yes                            | **no**                  |
+| Rx templates                                      | their own                      | **no**                  |
+| add / remove PA, assign locations                 | yes                            | no                      |
+| add / edit / archive locations, practice settings | yes                            | no                      |
 
 The table lives in [src/core/permissions/index.ts](src/core/permissions/index.ts).
 Location scope is not in it, because it is not a question of role: `resolveLocation`
-holds a PA to the locations she was assigned and lets a doctor name any location of
-his own practice.
+holds a PA to the locations they were assigned and lets a doctor name any location
+of their own practice.
 
 ## Auth
 
@@ -324,8 +480,8 @@ Phone and a one-time code. There is no password anywhere in this product.
   answers `CONFLICT` if they already belong to one. It takes no `X-Practice-Id`,
   because the whole point is that there is not one yet.
 - This matters more than it looks: bootstrapping on "no memberships" alone meant
-  an assistant who opened the app before the doctor added her got a clinic of her
-  own, was walked through doctor setup, and then belonged to two.
+  an assistant who opened the app before the doctor added them got a clinic of
+  their own, was walked through doctor setup, and then belonged to two.
 - **Signing in creates a session**, one row per device. An access token is a signed
   claim that cannot be withdrawn, so without a record on this side a phone that
   signed out would keep working until its token happened to expire. `requireAuth`
@@ -349,11 +505,11 @@ Phone and a one-time code. There is no password anywhere in this product.
   from the sign-in. A nightly sweep marks a lapsed session revoked; the TTL index
   removes the row a month later.
 - Membership is read on **every** request rather than carried in the token, so
-  removing a PA ends her access to that clinic now, not when her token expires. Her
-  **session is deliberately left alone**: she may work at another clinic on the same
-  sign-in. `resolvePractice` answers `MEMBERSHIP_REMOVED` for a clinic she was taken
-  off and `NOT_MEMBER` for one she was never on, because the app says different
-  things about them.
+  removing a PA ends their access to that clinic now, not when their token expires.
+  Their **session is deliberately left alone**: they may work at another clinic on
+  the same sign-in. `resolvePractice` answers `MEMBERSHIP_REMOVED` for a clinic they
+  were taken off and `NOT_MEMBER` for one they were never on, because the app says
+  different things about them.
 
 ## Prescriptions
 
@@ -527,8 +683,10 @@ does not.
 - **Every document** carries `practiceId`, `createdAt`, `updatedAt`, `createdBy`.
   Compound indexes start at `practiceId` and continue with `locationId` where a
   record belongs to a place.
-- **Location scope**: visits, prescriptions and voice. Patient search and history
-  are practice-wide **on purpose**.
+- **Location scope**: visits, prescriptions, voice and appointments. Patients
+  belong to the practice and are linked to locations; the doctor's search and
+  history are practice-wide **on purpose**, and an assistant sees the patients of
+  their own locations (see **Whose patients**).
 - **Bilingual** fields that print in Urdu hold `{ en, ur }`.
 - **Feature flags** live on `practice.features`.
 - **Naming**: collections plural camelCase, events `entity.pastTense`, permissions
@@ -536,9 +694,12 @@ does not.
 - **Private files**: audio and PDFs in private object storage only, served by short
   signed URLs. With S3 or R2 the bucket presigns them. With the local driver the
   API signs and serves them itself at `GET /api/v1/files/<key>?expires=&sig=`,
-  HMAC'd with the JWT secret — a `file://` path is no use to a phone. That route
+  HMAC'd with the JWT secret — a `file://` path is no use to a phone — and takes
+  uploads at `PUT` on the same path (see **Reports**). That route
   carries no session on purpose: the link is the credential, so the app can hand
-  it to a WebView, an image tag or a share sheet. Every signed URL says its
+  it to a WebView, an image tag or a share sheet. It answers with
+  `Cross-Origin-Resource-Policy: cross-origin`, so the web app can show a page in
+  an `<img>` from its own dev server. Every signed URL says its
   `contentType`, because without a renderer configured a print file is HTML and
   an app that assumes PDF will offer to share something it cannot. No patient names in logs or in object keys. The application log
   carries ids and masked phone numbers; the before/after of a record belongs in the
@@ -583,14 +744,19 @@ The suites that exist to hold the six rules down:
 
 | File                                                                                       | What it proves                                                                                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to her own locations; removing her ends her session now                                                                                                              |
+| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                          |
 | [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                             |
 | [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                         |
 | [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                                                                                 |
 | [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                       |
 | [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                                                                              |
 | [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                           |
-| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads: a good link serves the file, a tampered or expired one is refused                                                                                                                                                      |
+| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)               | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                        |
+| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)   | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill |
+| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                     |
+| [tests/integration/history.test.ts](tests/integration/history.test.ts)                     | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                               |
+| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                 | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                      |
+| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)   | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                      |
 | [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                  |
 | [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited |
 | [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                               |

@@ -1,7 +1,13 @@
 import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
 import { paginate, toJSON, type PaginateModel } from './plugins';
 
-/** A test that was ordered and, later, its result. */
+/**
+ * A test that was ordered and, later, its result.
+ *
+ * One row per line of an approved prescription's labs section, written at
+ * approval. A revision retires the rows of the version it replaces that have
+ * no result or file yet, and writes its own.
+ */
 export interface ILab {
   practiceId: Types.ObjectId;
   patientId: Types.ObjectId;
@@ -35,6 +41,8 @@ labSchema.plugin(toJSON);
 labSchema.plugin(paginate);
 
 labSchema.index({ practiceId: 1, patientId: 1 });
+// A revision finds the rows the version it replaces ordered.
+labSchema.index({ practiceId: 1, prescriptionId: 1 });
 
 export const Lab = mongoose.model<ILab, PaginateModel<ILab>>('Lab', labSchema, 'labs');
 export default Lab;

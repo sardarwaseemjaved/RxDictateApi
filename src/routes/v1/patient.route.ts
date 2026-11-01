@@ -3,15 +3,16 @@ import { patientController, reportController } from '../../controllers';
 import { patientValidation, reportValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
-import notImplemented from '../../middlewares/notImplemented';
-import { resolvePractice } from '../../core/tenancy';
+import { resolveLocationIfSent, resolvePractice } from '../../core/tenancy';
 import { requireCan } from '../../core/permissions';
 
 const router = express.Router();
 
 /**
- * Practice-wide and not location-scoped, on purpose: a patient first seen at one
- * location has to be findable at the other without being entered twice.
+ * Not location-scoped: a patient belongs to the whole practice. The doctor sees
+ * all of them; an assistant sees the ones linked to a location they work at,
+ * and anyone else is NOT_FOUND on every route here. patient.service decides,
+ * in one place.
  */
 router.get(
   '/',
@@ -22,10 +23,15 @@ router.get(
   patientController.searchPatients,
 );
 
+/**
+ * X-Location-Id is optional here but read when it is sent: it is where the
+ * patient was registered, which links them to that location.
+ */
 router.post(
   '/',
   requireAuth,
   resolvePractice,
+  resolveLocationIfSent,
   requireCan('patient.create'),
   validate(patientValidation.createPatient),
   patientController.createPatient,
@@ -49,14 +55,18 @@ router.patch(
   patientController.updatePatient,
 );
 
-/** Not built yet. Mounted now so the app can link to it and the path is final. */
+/**
+ * One timeline, newest first: visits with their vitals, prescriptions, ordered
+ * labs and reports. Practice-wide, because a patient seen at two locations has
+ * one history. The doctor's alone.
+ */
 router.get(
   '/:id/history',
   requireAuth,
   resolvePractice,
   requireCan('patient.history'),
   validate(patientValidation.getHistory),
-  notImplemented('Patient history'),
+  patientController.getHistory,
 );
 
 /**

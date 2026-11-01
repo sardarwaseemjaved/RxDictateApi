@@ -34,6 +34,22 @@ describe('The permissions table', () => {
     ['location.archive', 'pa', false],
     ['practice.update', 'doctor', true],
     ['practice.update', 'pa', false],
+
+    ['patient.history', 'doctor', true],
+    ['patient.history', 'pa', false],
+
+    ['report.create', 'pa', true],
+    ['report.review', 'doctor', true],
+    ['report.review', 'pa', false],
+
+    ['template.read', 'doctor', true],
+    ['template.create', 'doctor', true],
+    ['template.update', 'doctor', true],
+    ['template.delete', 'doctor', true],
+    ['template.read', 'pa', false],
+    ['template.create', 'pa', false],
+    ['template.update', 'pa', false],
+    ['template.delete', 'pa', false],
   ];
 
   test.each(expectations)('%s for a %s is %s', (action, role, allowed) => {

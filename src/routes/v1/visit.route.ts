@@ -44,6 +44,20 @@ router.patch(
 );
 
 /**
+ * Change who goes next. visit.update, because ordering the waiting room is part
+ * of running the queue, which the doctor and the assistant both do.
+ */
+router.post(
+  '/:id/move',
+  requireAuth,
+  resolvePractice,
+  resolveLocation,
+  requireCan('visit.update'),
+  validate(visitValidation.moveVisit),
+  visitController.moveVisit,
+);
+
+/**
  * Vitals belong to a visit, not to a patient: the same person's blood pressure
  * last month is a different reading, and the queue needs to know whether
  * today's has been taken.

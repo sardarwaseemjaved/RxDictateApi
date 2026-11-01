@@ -16,6 +16,12 @@ export interface IVisit {
   date: string;
   /** Called out in the waiting room. Per location, per day, from 1, never reused. */
   token: number;
+  /**
+   * The order of the day's list, smallest first. Starts equal to the token, and
+   * nothing ever puts a visit at or past the next token to be handed out - so
+   * a new visit, whose position is its token, always lands at the end.
+   */
+  queuePosition: number;
   /** Why they came, in the PA's words. */
   reason: string;
   status: VisitStatus;
@@ -39,6 +45,7 @@ const visitSchema = new Schema<IVisit>(
     patientId: { type: Schema.Types.ObjectId, ref: 'Patient', required: true },
     date: { type: String, required: true },
     token: { type: Number, required: true },
+    queuePosition: { type: Number, required: true },
     reason: { type: String, default: '', trim: true },
     status: { type: String, enum: ['waiting', 'with_doctor', 'done'], default: 'waiting' },
     statusChangedAt: { type: Date, default: () => new Date() },
@@ -56,6 +63,12 @@ visitSchema.plugin(paginate);
 visitSchema.index({ practiceId: 1, locationId: 1, date: 1, status: 1 });
 // Two patients must never be called by the same number on the same day.
 visitSchema.index({ practiceId: 1, locationId: 1, date: 1, token: 1 }, { unique: true });
+// The list in the order the assistant set. Not unique: renumbering a day
+// rewrites several rows one at a time, and passes through moments where two
+// share a number.
+visitSchema.index({ practiceId: 1, locationId: 1, date: 1, queuePosition: 1 });
+// One patient's visits at every location, for their history.
+visitSchema.index({ practiceId: 1, patientId: 1, createdAt: -1 });
 
 export const Visit = mongoose.model<IVisit, PaginateModel<IVisit>>('Visit', visitSchema, 'visits');
 export default Visit;

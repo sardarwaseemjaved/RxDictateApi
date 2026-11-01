@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { bilingualSchema, dateStringSchema, objectIdSchema, timingSchema } from './common';
+import { patientSummarySchema } from './patient.schema';
 
 export const prescriptionStatusSchema = z.enum(['draft', 'approved', 'superseded', 'cancelled']);
 export type PrescriptionStatus = z.infer<typeof prescriptionStatusSchema>;
@@ -271,6 +272,19 @@ export const prescriptionViewSchema = z.object({
 });
 export type PrescriptionView = z.infer<typeof prescriptionViewSchema>;
 
+/**
+ * One row of GET /prescriptions: the prescription, plus who it is for.
+ *
+ * Only on the list. A single prescription is opened from a patient the app
+ * already has, and adding the patient to PrescriptionView itself would put a
+ * patient lookup behind every write that returns one. Null when the patient
+ * record has since been removed.
+ */
+export const prescriptionListItemSchema = prescriptionViewSchema.extend({
+  patient: patientSummarySchema.nullable(),
+});
+export type PrescriptionListItem = z.infer<typeof prescriptionListItemSchema>;
+
 /* ------------------------------------------------------------------ *
  * Requests
  * ------------------------------------------------------------------ */
@@ -282,6 +296,18 @@ export const createPrescriptionBodySchema = z.object({
   printLanguage: printLanguageSchema.default('en_ur'),
 });
 export type CreatePrescriptionBody = z.infer<typeof createPrescriptionBodySchema>;
+
+/**
+ * POST /prescriptions/from-template/:id. The visit works as it does for
+ * POST /prescriptions: without one, the patient is put on today's list. When
+ * that visit already has an open draft, the template's lines are added to it
+ * and nothing the doctor has written is removed.
+ */
+export const createFromTemplateBodySchema = z.object({
+  patientId: objectIdSchema,
+  visitId: objectIdSchema.nullable().optional(),
+});
+export type CreateFromTemplateBody = z.infer<typeof createFromTemplateBodySchema>;
 
 export const patchPrescriptionBodySchema = z
   .object({
@@ -296,10 +322,17 @@ export const revisePrescriptionBodySchema = z.object({
 });
 export type RevisePrescriptionBody = z.infer<typeof revisePrescriptionBodySchema>;
 
-export const listPrescriptionsQuerySchema = z.object({
-  patientId: objectIdSchema.optional(),
-  status: prescriptionStatusSchema.optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-});
+export const listPrescriptionsQuerySchema = z
+  .object({
+    patientId: objectIdSchema.optional(),
+    status: prescriptionStatusSchema.optional(),
+    /** Karachi calendar days, inclusive, matched against when the prescription was started. */
+    from: dateStringSchema.optional(),
+    to: dateStringSchema.optional(),
+    /** A patient's name, phone or MR number, matched the way patient search matches them. */
+    q: z.string().trim().min(1).max(160).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  })
+  .refine((query) => !query.from || !query.to || query.from <= query.to, 'from must not be after to');
 export type ListPrescriptionsQuery = z.infer<typeof listPrescriptionsQuerySchema>;

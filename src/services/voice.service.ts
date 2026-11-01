@@ -30,6 +30,23 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   mp3: 'audio/mpeg',
 };
 
+const LEGACY_ANDROID_DURATION_MIN = 1_000_000_000_000;
+const MAX_SEGMENT_DURATION_MS = 30 * 60 * 1000;
+const LEGACY_APP_AUDIO_BIT_RATE = 64_000;
+
+/**
+ * expo-audio 1.1.x exposes Android recorder.currentTime as its epoch start
+ * timestamp. An older app multiplied that by 1000 and sent it as durationMs.
+ * Recognise only that impossible timestamp-shaped value and approximate the
+ * elapsed time from the old app's fixed 64 kbps AAC setting. Normal oversized
+ * durations still fail request validation.
+ */
+const normalizedDurationMs = (supplied: number, audioBytes: number): number => {
+  if (supplied < LEGACY_ANDROID_DURATION_MIN) return supplied;
+  const estimated = Math.round((audioBytes * 8 * 1000) / LEGACY_APP_AUDIO_BIT_RATE);
+  return Math.min(MAX_SEGMENT_DURATION_MS, Math.max(1000, estimated));
+};
+
 /* ------------------------------------------------------------------ *
  * Views
  * ------------------------------------------------------------------ */
@@ -123,9 +140,19 @@ const segmentIndex = (session: VoiceSessionDoc, segmentId: Types.ObjectId): numb
 const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): Promise<void> => {
   const index = segmentIndex(session, segmentId);
   const segment = session.segments[index];
+  const sessionId = String(session._id);
+  const id = String(segmentId);
+
+  logger.info(`[voice] processing started sessionId=${sessionId} segmentId=${id} seq=${segment.seq}`);
 
   const extension = segment.audio.key.split('.').pop() ?? 'm4a';
   const audio = await getObject(segment.audio.key);
+  const contentType = CONTENT_TYPE_BY_EXTENSION[extension] ?? 'audio/m4a';
+  logger.info(
+    `[voice] transcription started sessionId=${sessionId} segmentId=${id} provider=${config.voice.sttProvider} ` +
+      `model=${config.openai.sttModel} bytes=${audio.length} durationMs=${segment.audio.durationMs} ` +
+      `contentType=${contentType}`,
+  );
 
   const prescription = await Prescription.findOne({ _id: session.prescriptionId, deletedAt: null });
   if (!prescription) {
@@ -136,7 +163,7 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   }
   const sections = wireSections(prescription.sections);
 
-  const transcription = await transcribe(audio, CONTENT_TYPE_BY_EXTENSION[extension] ?? 'audio/m4a', {
+  const transcription = await transcribe(audio, contentType, {
     // A brand name is the word a general model gets wrong and the word that
     // has to be right, so what is already on the draft is given to it.
     drugNames: sections.medicines.map((medicine) => medicine.name),
@@ -149,6 +176,16 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   segment.status = 'transcribed';
   session.markModified('segments');
   await session.save();
+  logger.info(
+    `[voice] transcription completed sessionId=${sessionId} segmentId=${id} model=${transcription.provider} ` +
+      `transcriptChars=${transcription.transcript.length} spans=${transcription.spans.length} ` +
+      `costUsd=${transcription.costUsd ?? 'unknown'}`,
+  );
+
+  logger.info(
+    `[voice] extraction started sessionId=${sessionId} segmentId=${id} provider=${config.voice.llmProvider} ` +
+      `model=${config.openai.model}`,
+  );
 
   const extraction = await extractOps({
     transcript: transcription.transcript,
@@ -174,6 +211,11 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   segment.ops = extraction.ops;
   segment.llmModel = extraction.model;
   segment.costUsd = (segment.costUsd ?? 0) + (extraction.costUsd ?? 0);
+  logger.info(
+    `[voice] extraction completed sessionId=${sessionId} segmentId=${id} model=${extraction.model} ` +
+      `ops=${extraction.ops.length} annotations=${extraction.spans.length} ` +
+      `totalCostUsd=${segment.costUsd ?? 'unknown'}`,
+  );
 
   // Applied to the sections as they are now, not the copy the extractor was
   // shown: an earlier segment may have landed while this one was in flight.
@@ -190,6 +232,11 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
   segment.error = null;
   session.markModified('segments');
   await session.save();
+  logger.info(
+    `[voice] segment applied sessionId=${sessionId} segmentId=${id} prescriptionId=${String(
+      prescription._id,
+    )} seq=${segment.seq} ops=${extraction.ops.length}`,
+  );
 
   await writeAudit(scopeOf(session), {
     action: 'voice.segmentApplied',
@@ -218,6 +265,12 @@ const failSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId, 
   segment.error = error.message;
   fresh.markModified('segments');
   await fresh.save();
+
+  const code = error instanceof AppError ? error.code : 'UNEXPECTED';
+  logger.warn(
+    `[voice] segment failed sessionId=${String(fresh._id)} segmentId=${String(segmentId)} seq=${segment.seq} ` +
+      `code=${code} error=${error.message}`,
+  );
 
   emit('voice.segmentFailed', {
     practiceId: fresh.practiceId,
@@ -338,12 +391,23 @@ const getOrCreateSession = async (scope: Scope, prescription: PrescriptionDoc): 
   if (existing) {
     return existing;
   }
-  return sessions.create(scope, {
-    prescriptionId: prescription._id,
-    doctorId: prescription.doctorId,
-    status: 'open',
-    segments: [],
-  });
+  try {
+    return await sessions.create(scope, {
+      prescriptionId: prescription._id,
+      doctorId: prescription.doctorId,
+      status: 'open',
+      segments: [],
+    });
+  } catch (error) {
+    // The screen query and the upload can arrive together. The unique
+    // prescriptionId index decides which creates the session; the loser reads
+    // the winner instead of surfacing a duplicate-key error to the app.
+    if ((error as { code?: number }).code === 11000) {
+      const raced = await sessions.findOne(scope, { prescriptionId: prescription._id });
+      if (raced) return raced;
+    }
+    throw error;
+  }
 };
 
 /**
@@ -388,12 +452,20 @@ export const addSegment = async (scope: Scope, prescriptionId: string, body: Add
     );
   }
 
+  const durationMs = normalizedDurationMs(body.durationMs, audio.length);
+  if (durationMs !== body.durationMs) {
+    logger.warn(
+      `[voice] corrected legacy Android duration prescriptionId=${String(prescription._id)} ` +
+        `suppliedMs=${body.durationMs} estimatedMs=${durationMs} bytes=${audio.length}`,
+    );
+  }
+
   const key = audioKey(scope.practiceId, session.locationId, prescription._id, body.seq, extensionFor(body.contentType));
   await put(key, audio, body.contentType);
 
   session.segments.push({
     seq: body.seq,
-    audio: { key, bytes: audio.length, durationMs: body.durationMs, deletedAt: null },
+    audio: { key, bytes: audio.length, durationMs, deletedAt: null },
     status: 'uploaded',
     error: null,
     transcript: '',
@@ -408,11 +480,16 @@ export const addSegment = async (scope: Scope, prescriptionId: string, body: Add
 
   const stored = session.segments[session.segments.length - 1];
 
+  logger.info(
+    `[voice] upload accepted sessionId=${String(session._id)} segmentId=${String(stored._id)} ` +
+      `prescriptionId=${String(prescription._id)} seq=${stored.seq} bytes=${audio.length}; queued for processing`,
+  );
+
   await writeAudit(scope, {
     action: 'voice.segmentUploaded',
     entity: 'prescription',
     entityId: prescription._id,
-    after: { seq: body.seq, bytes: audio.length, durationMs: body.durationMs },
+    after: { seq: body.seq, bytes: audio.length, durationMs },
   });
 
   // Transcription runs in the background and the app polls GET .../voice.
@@ -423,11 +500,7 @@ export const addSegment = async (scope: Scope, prescriptionId: string, body: Add
 
 export const getVoiceSession = async (scope: Scope, prescriptionId: string): Promise<VoiceSessionView> => {
   const prescription = await loadDraft(scope, prescriptionId);
-  const session = await sessions.findOne(scope, { prescriptionId: prescription._id });
-  if (!session) {
-    // Nothing has been dictated yet, which is not an error.
-    return { id: '', prescriptionId: String(prescription._id), status: 'open', segments: [], audioDeleteAfter: null };
-  }
+  const session = await getOrCreateSession(scope, prescription);
   return toSessionView(session);
 };
 
@@ -457,6 +530,8 @@ export const retrySegment = async (scope: Scope, segmentId: string): Promise<Seg
   segment.startedAt = null;
   session.markModified('segments');
   await session.save();
+
+  logger.info(`[voice] retry queued sessionId=${String(session._id)} segmentId=${String(segment._id)} seq=${segment.seq}`);
 
   kick(session._id);
   return toSegmentView(session.segments[index]);

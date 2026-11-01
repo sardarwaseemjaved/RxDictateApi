@@ -18,6 +18,13 @@ export const visitViewSchema = z.object({
    * because the patient holding that slip has already heard it.
    */
   token: z.number().int().min(1),
+  /**
+   * The visit's place in its day's list at its location: sort by it, smallest
+   * first. Not a count and not gap-free - a moved visit lands between its new
+   * neighbours, so 2.5 is an ordinary value - and never shown. The token is
+   * what a patient hears; this is only the order the assistant chose.
+   */
+  queuePosition: z.number(),
   /** Why they came, in the PA's words: "Fever 3 days". */
   reason: z.string(),
   /** When the visit entered its current status, for "went in 6 min ago". */
@@ -41,6 +48,17 @@ export const updateVisitBodySchema = z.object({
   status: visitStatusSchema,
 });
 export type UpdateVisitBody = z.infer<typeof updateVisitBodySchema>;
+
+/**
+ * Where a waiting visit goes: just before the visit `before`, or after every
+ * other waiting visit when it is null. Relative rather than a number, so two
+ * people rearranging at once each get what they asked for instead of one
+ * overwriting the other's arithmetic.
+ */
+export const moveVisitBodySchema = z.object({
+  before: objectIdSchema.nullable(),
+});
+export type MoveVisitBody = z.infer<typeof moveVisitBodySchema>;
 
 /** `date` accepts the literal `today`, resolved against Asia/Karachi. */
 export const listVisitsQuerySchema = z.object({

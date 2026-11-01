@@ -23,9 +23,10 @@ export interface StorageDriver {
   get(key: string): Promise<Buffer>;
   /**
    * A URL the client can PUT straight to, so a phone photo never passes
-   * through the API. Not every driver can issue one.
+   * through the API's request handlers. `size` is the most the upload may be;
+   * the local driver enforces it, and S3 leaves it to the bucket.
    */
-  signedPutUrl?(key: string, contentType: string, expiresInSeconds: number): Promise<string>;
+  signedPutUrl?(key: string, contentType: string, expiresInSeconds: number, size?: number): Promise<string>;
   signedGetUrl(key: string, expiresInSeconds: number): Promise<string>;
   remove(key: string): Promise<void>;
 }
@@ -121,10 +122,10 @@ export const extensionFor = (contentType: string): string =>
   })[contentType] ?? 'bin';
 
 /* ------------------------------------------------------------------ *
- * Signing a local download
+ * Signing a local download or upload
  * ------------------------------------------------------------------ */
 
-/** Where the local driver's download route is mounted. */
+/** Where the local driver's download and upload route is mounted. */
 export const LOCAL_FILES_PATH = '/api/v1/files';
 
 /**
@@ -140,38 +141,83 @@ export const LOCAL_FILES_PATH = '/api/v1/files';
 const signatureFor = (key: string, expires: number): string =>
   createHmac('sha256', config.jwt.secret).update(`${key}:${expires}`).digest('hex');
 
+/**
+ * An upload is signed over everything that makes it safe to accept: which
+ * object, until when, of what type and how big. The newlines and the leading
+ * PUT keep it from ever matching a download's `key:expires`, so a link to read
+ * a file can never be turned into a link to write one.
+ */
+const uploadSignatureFor = (key: string, expires: number, contentType: string, size: number): string =>
+  createHmac('sha256', config.jwt.secret).update(`PUT\n${key}\n${expires}\n${contentType}\n${size}`).digest('hex');
+
+/**
+ * An expired link and a tampered one are both refused, and deliberately with
+ * the same answer, because telling them apart tells a guesser which half to
+ * keep trying.
+ */
+const refusedLink = (): AppError => new AppError('FORBIDDEN', 'That link is not valid any more.');
+
+/** The expiry as a number, or a refusal when it is missing, malformed or past. */
+const unexpired = (expires: string | undefined): number => {
+  const expiresAt = Number(expires);
+  if (!expires || !Number.isFinite(expiresAt) || expiresAt * 1000 < Date.now()) {
+    throw refusedLink();
+  }
+  return expiresAt;
+};
+
+/** Constant time, so the comparison itself does not leak the signature. */
+const assertSignature = (signature: string | undefined, expected: string): void => {
+  if (!signature) {
+    throw refusedLink();
+  }
+  const given = Buffer.from(signature, 'utf8');
+  const wanted = Buffer.from(expected, 'utf8');
+  if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+    throw refusedLink();
+  }
+};
+
 export interface LocalDownloadRequest {
   key: string;
   expires: string | undefined;
   signature: string | undefined;
 }
 
-/**
- * Check a local download link. Returns the content type to serve it with, or
- * throws - an expired link and a tampered one are both refused, and
- * deliberately with the same answer, because telling them apart tells a
- * guesser which half to keep trying.
- */
+/** Check a local download link. Returns the content type to serve it with, or throws. */
 export const verifyLocalDownload = ({ key, expires, signature }: LocalDownloadRequest): { contentType: string } => {
-  const refused = new AppError('FORBIDDEN', 'That link is not valid any more.');
-
-  const expiresAt = Number(expires);
-  if (!expires || !Number.isFinite(expiresAt) || !signature) {
-    throw refused;
-  }
-  if (expiresAt * 1000 < Date.now()) {
-    throw refused;
-  }
-
-  const expected = signatureFor(key, expiresAt);
-  // Constant time, so the comparison itself does not leak the signature.
-  const given = Buffer.from(signature, 'utf8');
-  const wanted = Buffer.from(expected, 'utf8');
-  if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
-    throw refused;
-  }
-
+  const expiresAt = unexpired(expires);
+  assertSignature(signature, signatureFor(key, expiresAt));
   return { contentType: contentTypeFor(key) };
+};
+
+export interface LocalUploadRequest extends LocalDownloadRequest {
+  /** The `ct` the link was signed with, not the header the client sent. */
+  contentType: string | undefined;
+  size: string | undefined;
+}
+
+/**
+ * Check a local upload link. Returns what it was signed for - the content type
+ * the body has to arrive as and the most it may weigh - or throws.
+ *
+ * Checking the request against those is the route's job, because the route is
+ * what can see the headers and the body.
+ */
+export const verifyLocalUpload = ({
+  key,
+  expires,
+  signature,
+  contentType,
+  size,
+}: LocalUploadRequest): { contentType: string; size: number } => {
+  const expiresAt = unexpired(expires);
+  const maxBytes = Number(size);
+  if (!contentType || !Number.isInteger(maxBytes) || maxBytes < 1) {
+    throw refusedLink();
+  }
+  assertSignature(signature, uploadSignatureFor(key, expiresAt, contentType, maxBytes));
+  return { contentType, size: maxBytes };
 };
 
 /* ------------------------------------------------------------------ *
@@ -217,10 +263,10 @@ const s3Driver = (): StorageDriver => {
 };
 
 /**
- * For a dev box and the test suite. Files land under STORAGE_LOCAL_DIR and a
- * "signed" URL is the absolute path, which is honest: there is no signing here
- * and there is nothing to sign against. The driver name travels in the response
- * meta so the app can tell the difference.
+ * For a dev box and the test suite. Files land under STORAGE_LOCAL_DIR, and
+ * this API stands in for the bucket: it signs its own download and upload
+ * links with an HMAC and serves both at /api/v1/files, so the apps upload and
+ * read a report the same way they would against S3.
  */
 const localDriver = (): StorageDriver => {
   const root = path.resolve(config.storage.localDir);
@@ -258,6 +304,19 @@ const localDriver = (): StorageDriver => {
       const query = new URLSearchParams({ expires: String(expires), sig: signatureFor(key, expires) });
       return `${config.publicApiUrl}${LOCAL_FILES_PATH}/${key}?${query.toString()}`;
     },
+    // A caller that names no size gets the largest upload this server takes
+    // anywhere, rather than no ceiling at all.
+    async signedPutUrl(key, contentType, expiresInSeconds, size = config.storage.maxAudioBytes) {
+      resolveKey(key);
+      const expires = Math.floor((Date.now() + expiresInSeconds * 1000) / 1000);
+      const query = new URLSearchParams({
+        expires: String(expires),
+        ct: contentType,
+        size: String(size),
+        sig: uploadSignatureFor(key, expires, contentType, size),
+      });
+      return `${config.publicApiUrl}${LOCAL_FILES_PATH}/${key}?${query.toString()}`;
+    },
     async remove(key) {
       await fs.rm(resolveKey(key), { force: true });
     },
@@ -281,14 +340,12 @@ export const get = async (key: string): Promise<Buffer> => driver().get(key);
 
 /**
  * A presigned PUT, or STORAGE_UNAVAILABLE when the configured driver cannot
- * issue one. The local driver cannot: there is no signing and nothing to sign
- * against, and answering with a URL the phone could not use would be worse
- * than saying so.
+ * issue one. Both drivers can today; the check stays for the next one.
  */
 export const signedPutUrl = async (
   key: string,
   contentType: string,
-  expiresInSeconds: number = config.storage.signedUrlTtlSeconds,
+  { size, expiresInSeconds = config.storage.signedUrlTtlSeconds }: { size?: number; expiresInSeconds?: number } = {},
 ): Promise<{ url: string; expiresAt: Date }> => {
   const active = driver();
   if (!active.signedPutUrl) {
@@ -298,7 +355,7 @@ export const signedPutUrl = async (
     );
   }
   return {
-    url: await active.signedPutUrl(key, contentType, expiresInSeconds),
+    url: await active.signedPutUrl(key, contentType, expiresInSeconds, size),
     expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
   };
 };
@@ -331,6 +388,7 @@ export default {
   signedGetUrl,
   signedPutUrl,
   verifyLocalDownload,
+  verifyLocalUpload,
   contentTypeFor,
   supportsUploads,
   remove,

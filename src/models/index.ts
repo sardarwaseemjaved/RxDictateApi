@@ -6,6 +6,7 @@ export { User, type IUser, type UserDoc } from './user.model';
 export { Membership, type IMembership, type MembershipDoc } from './membership.model';
 export { OtpCode, type IOtpCode, type OtpCodeDoc } from './otpCode.model';
 export { Patient, type IPatient, type PatientDoc } from './patient.model';
+export { PatientIntroduction, type IPatientIntroduction, type PatientIntroductionDoc } from './patientIntroduction.model';
 export { Visit, type IVisit, type VisitDoc } from './visit.model';
 export { Prescription, type IPrescription, type PrescriptionDoc } from './prescription.model';
 export { VoiceSession, type ISegment, type IVoiceSession, type VoiceSessionDoc } from './voiceSession.model';
@@ -28,6 +29,7 @@ import { User } from './user.model';
 import { Membership } from './membership.model';
 import { OtpCode } from './otpCode.model';
 import { Patient } from './patient.model';
+import { PatientIntroduction } from './patientIntroduction.model';
 import { Visit } from './visit.model';
 import { Prescription } from './prescription.model';
 import { VoiceSession } from './voiceSession.model';
@@ -56,6 +58,7 @@ export const allModels = [
   Membership,
   OtpCode,
   Patient,
+  PatientIntroduction,
   Visit,
   Prescription,
   VoiceSession,

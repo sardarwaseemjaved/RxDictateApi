@@ -49,9 +49,9 @@ const routes = [
   { path: '/follow-ups', route: followUpRoute },
   { path: '/reports', route: reportRoute },
   { path: '/notifications', route: notificationRoute },
+  { path: '/templates', route: templateRoute },
   // Not built yet; mounted so the app can link to them.
   { path: '/devices', route: deviceRoute },
-  { path: '/templates', route: templateRoute },
   { path: '/portal', route: portalRoute },
 ];
 
@@ -60,8 +60,8 @@ routes.forEach((route) => {
 });
 
 /**
- * Downloads for the local storage driver. Not mounted at all with S3 or R2,
- * where the bucket serves its own presigned URLs.
+ * Downloads and uploads for the local storage driver. Not mounted at all with
+ * S3 or R2, where the bucket serves its own presigned URLs.
  */
 if (servesLocalFiles()) {
   router.use('/files', fileRoute);

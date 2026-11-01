@@ -66,14 +66,41 @@ export const resolvePractice: RequestHandler = catchAsync(async (req, _res, next
   next();
 });
 
+/** The location a header names if this caller may use it, or why they may not. */
+const checkLocation = async (ctx: Express.PracticeContext, header: string): Promise<Types.ObjectId | AppError> => {
+  if (!Types.ObjectId.isValid(header)) {
+    return new AppError('VALIDATION_ERROR', 'X-Location-Id is not a valid id');
+  }
+  const locationId = new Types.ObjectId(header);
+
+  const location = await Location.findOne({ _id: locationId, practiceId: ctx.practiceId, deletedAt: null });
+  if (!location) {
+    // Deliberately a 403 and not a 404: whether a location exists in someone
+    // else's practice is not this caller's business.
+    return new AppError('LOCATION_NOT_ALLOWED', 'That location is not one of yours');
+  }
+
+  if (location.status === 'archived') {
+    return new AppError('LOCATION_ARCHIVED', 'That location has been archived');
+  }
+
+  if (ctx.allowedLocationIds !== 'all') {
+    const allowed = ctx.allowedLocationIds.some((id) => id.equals(locationId));
+    if (!allowed) {
+      return new AppError('LOCATION_NOT_ALLOWED', 'You do not work at that location');
+    }
+  }
+
+  return locationId;
+};
+
 /**
- * Which location, from X-Location-Id. Mounted on visits, prescriptions and
- * voice, which are the records that belong to a place rather than to the
- * practice as a whole.
+ * Which location, from X-Location-Id. Mounted on visits, prescriptions, voice
+ * and appointments, which are the records that belong to a place rather than
+ * to the practice as a whole.
  *
- * Patient search and history are deliberately practice-wide: a patient first
- * seen at one clinic must be findable at the other without being typed in
- * twice.
+ * Patients belong to the practice, and an assistant sees the ones linked to
+ * the locations they work at - see the finder in patient.service.
  */
 export const resolveLocation: RequestHandler = catchAsync(async (req, _res, next) => {
   const { ctx } = req;
@@ -85,27 +112,35 @@ export const resolveLocation: RequestHandler = catchAsync(async (req, _res, next
   if (!header) {
     throw new AppError('LOCATION_REQUIRED', 'X-Location-Id is required on this route');
   }
-  const locationId = asObjectId(header, 'X-Location-Id');
 
-  const location = await Location.findOne({ _id: locationId, practiceId: ctx.practiceId, deletedAt: null });
-  if (!location) {
-    // Deliberately a 403 and not a 404: whether a location exists in someone
-    // else's practice is not this caller's business.
-    throw new AppError('LOCATION_NOT_ALLOWED', 'That location is not one of yours');
+  const checked = await checkLocation(ctx, header);
+  if (checked instanceof AppError) {
+    throw checked;
   }
 
-  if (location.status === 'archived') {
-    throw new AppError('LOCATION_ARCHIVED', 'That location has been archived');
-  }
+  ctx.locationId = checked;
+  next();
+});
 
-  if (ctx.allowedLocationIds !== 'all') {
-    const allowed = ctx.allowedLocationIds.some((id) => id.equals(locationId));
-    if (!allowed) {
-      throw new AppError('LOCATION_NOT_ALLOWED', 'You do not work at that location');
+/**
+ * X-Location-Id when it is sent and names a location this caller may use, and
+ * nothing otherwise.
+ *
+ * For routes that do not belong to a place but want to know where the request
+ * came from: registering a patient links them to the location they were
+ * registered at. The apps always send the header. One that names somewhere
+ * the caller does not work is ignored rather than refused, because the route
+ * would have worked without it.
+ */
+export const resolveLocationIfSent: RequestHandler = catchAsync(async (req, _res, next) => {
+  const { ctx } = req;
+  const header = req.get(LOCATION_HEADER);
+  if (ctx && header) {
+    const checked = await checkLocation(ctx, header);
+    if (!(checked instanceof AppError)) {
+      ctx.locationId = checked;
     }
   }
-
-  ctx.locationId = locationId;
   next();
 });
 
@@ -133,4 +168,4 @@ export const locationFrom = (req: Request): Types.ObjectId => {
   return locationId;
 };
 
-export default { resolvePractice, resolveLocation, scopeFrom, locationFrom };
+export default { resolvePractice, resolveLocation, resolveLocationIfSent, scopeFrom, locationFrom };

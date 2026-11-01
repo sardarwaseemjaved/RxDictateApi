@@ -70,7 +70,11 @@ export const addSegmentBodySchema = z.object({
     .number()
     .int()
     .min(0)
-    .max(30 * 60 * 1000),
+    .max(Number.MAX_SAFE_INTEGER)
+    .refine(
+      (durationMs) => durationMs <= 30 * 60 * 1000 || durationMs >= 1_000_000_000_000,
+      'Too big: expected number to be <=1800000',
+    ),
   contentType: z.enum(['audio/m4a', 'audio/mp4', 'audio/aac', 'audio/wav', 'audio/webm', 'audio/mpeg']),
   audioBase64: z.string().min(1),
 });

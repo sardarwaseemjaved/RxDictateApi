@@ -61,7 +61,7 @@ components:
       required: true
       schema:
         type: string
-      description: Required on visits, prescriptions and voice
+      description: Required on visits, prescriptions, voice, appointments and follow-ups. Optional on POST /patients, where it says where the patient was registered.
 
   securitySchemes:
     bearerAuth:

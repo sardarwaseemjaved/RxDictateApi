@@ -18,6 +18,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "cross-env NODE_ENV=development nodemon",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed:patients": "ts-node src/scripts/seedPatients.ts",
     "test": "jest -i --colors --verbose --detectOpenHandles",
     "test:watch": "jest -i --watchAll",
     "coverage": "jest -i --coverage",

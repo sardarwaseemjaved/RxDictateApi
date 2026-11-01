@@ -9,6 +9,7 @@ export * as practiceValidation from './practice.validation';
 export * as prescriptionValidation from './prescription.validation';
 export * as reportValidation from './report.validation';
 export * as teamValidation from './team.validation';
+export * as templateValidation from './template.validation';
 export * as visitValidation from './visit.validation';
 export * as vitalsValidation from './vitals.validation';
 export * as voiceValidation from './voice.validation';

@@ -1,0 +1,392 @@
+# Paths, described where a route needs more than its name to be used.
+#
+# Request and response bodies are zod schemas in src/shared - the contract the
+# apps import - and are named here rather than copied, so there is nothing for
+# this file to drift from. Every success body is { data, meta }.
+
+paths:
+  /files/{key}:
+    get:
+      tags: [Files]
+      summary: Read a file the local storage driver holds
+      description: |
+        Mounted only with STORAGE_DRIVER=local; with S3 or R2 the bucket serves its own links.
+        No session: the signed link is the credential. Answers with
+        Cross-Origin-Resource-Policy: cross-origin, so a page can be shown in an <img>.
+      security: []
+      parameters:
+        - { in: path, name: key, required: true, schema: { type: string } }
+        - { in: query, name: expires, required: true, schema: { type: integer } }
+        - { in: query, name: sig, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'The file, with its Content-Type' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Files]
+      summary: Upload a file to the local storage driver
+      description: |
+        The dev-box stand-in for a presigned S3 PUT. The URL comes from POST /reports/uploads
+        (uploadUrl) and is signed over the key, the expiry, the content type (ct) and the most
+        the body may weigh (size). Send the bytes as the body with Content-Type equal to ct and
+        no Authorization header. Answers like a bucket: 200 with an ETag.
+
+        An expired or altered link is FORBIDDEN. A different Content-Type, a body larger than
+        size, or an empty body is VALIDATION_ERROR. Browsers need their origin in CORS_ORIGINS.
+      security: []
+      parameters:
+        - { in: path, name: key, required: true, schema: { type: string } }
+        - { in: query, name: expires, required: true, schema: { type: integer } }
+        - { in: query, name: ct, required: true, schema: { type: string, enum: [image/jpeg, image/png, application/pdf] } }
+        - { in: query, name: size, required: true, schema: { type: integer } }
+        - { in: query, name: sig, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          application/pdf: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: 'Stored. data: { fileKey, size }'
+          headers:
+            ETag: { schema: { type: string }, description: 'MD5 of the bytes, quoted, as S3 gives it' }
+        '400':
+          {
+            description: 'VALIDATION_ERROR',
+            content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+          }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /reports/uploads:
+    post:
+      tags: [Reports]
+      summary: Somewhere to PUT one report page
+      description: |
+        Body createUploadBodySchema { contentType, size }; data uploadTicketSchema
+        { uploadUrl, fileKey, expiresAt }. PUT the bytes to uploadUrl, then pass fileKey in
+        pageKeys to POST /patients/{id}/reports. With S3 or R2 uploadUrl is the bucket's;
+        with the local driver it is PUT /files/{key}.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: An upload ticket }
+        '400': { description: 'VALIDATION_ERROR: a type or a size the contract does not allow' }
+
+  /reports/{id}/review:
+    post:
+      tags: [Reports]
+      summary: Mark a report reviewed (doctor)
+      description: |
+        Sets reviewedAt and reviewedBy and answers with the ReportView (reportViewSchema).
+        Idempotent: reviewing again returns the report unchanged, keeping the first review.
+        Audited; sends no notification. Permission report.review.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The report }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patients:
+    get:
+      tags: [Patients]
+      summary: Search and list patients
+      description: |
+        Items are patientViewSchema; meta is patientListMetaSchema { page, limit, total, totalPages,
+        counts { all, followUpDue, newReports } }.
+
+        Who is in it: the doctor sees every patient of the clinic. An assistant sees the patients
+        linked to a location they work at - registered there, or with a visit or an appointment
+        there - and that holds for the list, the paging totals and every count. Taking a location
+        off an assistant hides its patients on their next request.
+
+        The one exception: an assistant who types a patient's whole phone number (q in E.164, exactly
+        as stored) finds them wherever they were registered. For 30 minutes after, that assistant may
+        open the patient and add them to a list or book them at their own location, which links the
+        patient there for good. A prefix of a number finds only their own patients.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - {
+            in: query,
+            name: q,
+            description: 'A name, an MR number, or (the start of) a phone number',
+            schema: { type: string },
+          }
+        - { in: query, name: sort, schema: { type: string, enum: [name, lastVisit], default: name } }
+        - { in: query, name: followUpDue, schema: { type: boolean, default: false } }
+        - { in: query, name: newReports, schema: { type: boolean, default: false } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: One page of patients }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Patients]
+      summary: Register a patient
+      description: |
+        Body createPatientBodySchema; data is the PatientView, with its new MR number.
+        X-Location-Id is optional but read when sent, and is where the patient was registered: it
+        links them to that location. Without a usable one, an assistant's patient is linked to every
+        location the assistant works at, and the doctor's to the clinic's default location.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: header, name: X-Location-Id, required: false, schema: { type: string } }
+      responses:
+        '201': { description: The patient }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /patients/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Patients]
+      summary: One patient
+      description: |
+        NOT_FOUND for a patient an assistant may not see (see GET /patients), exactly as for one that
+        does not exist. The same holds wherever a patient is named by id: PATCH here, the reports
+        below, GET /reports/{id}, and patientId on POST /visits, POST /appointments,
+        GET /prescriptions and POST /prescriptions.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The patient }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Patients]
+      summary: Correct a patient's details
+      description: Body updatePatientBodySchema. NOT_FOUND as for GET.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The patient }
+        '400': { description: VALIDATION_ERROR }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patients/{id}/reports:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Reports]
+      summary: A patient's reports, newest test first
+      description: Items are reportViewSchema. NOT_FOUND for a patient this caller may not see.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: One page of reports }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Reports]
+      summary: File a report against a patient
+      description: |
+        Body createReportBodySchema; the pages come from POST /reports/uploads. NOT_FOUND for a
+        patient this caller may not see.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: The report }
+        '400': { description: VALIDATION_ERROR }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/{id}:
+    get:
+      tags: [Reports]
+      summary: One report, with a short-lived link per page
+      description: Data is reportDetailViewSchema. NOT_FOUND when its patient is one this caller may not see.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The report }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patients/{id}/history:
+    get:
+      tags: [Patients]
+      summary: A patient's timeline, newest first (doctor)
+      description: |
+        Visits with their vitals, prescriptions (all but cancelled), labs and reports, as
+        historyItemViewSchema items discriminated by kind; meta is { page, limit, total, totalPages }.
+        Practice-wide: no X-Location-Id. Permission patient.history.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: query, name: kind, schema: { type: string, enum: [visit, prescription, lab, report] } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: One page of the timeline }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /visits:
+    get:
+      tags: [Visits]
+      summary: One day's list at this location, in the order the assistant set
+      description: |
+        Items are visitViewSchema, sorted by queuePosition and then token. queuePosition is
+        the visit's place in its day's list at its location: a number to sort by, not a count
+        and not gap-free (2.5 is ordinary). A new visit starts at its token, which puts it at
+        the end. The apps group the list by status and keep this order inside each group.
+        date accepts the literal today, resolved against Asia/Karachi.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { $ref: '#/components/parameters/LocationId' }
+        - {
+            in: query,
+            name: date,
+            description: 'today, or a Karachi day (YYYY-MM-DD)',
+            schema: { type: string, default: today },
+          }
+        - { in: query, name: status, schema: { type: string, enum: [waiting, with_doctor, done] } }
+      responses:
+        '200': { description: The list }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /visits/{id}/move:
+    post:
+      tags: [Visits]
+      summary: Change who goes next (doctor, assistant)
+      description: |
+        Body moveVisitBodySchema { before }: the visit goes just before the visit before, or
+        after every other waiting visit when before is null. Answers with the moved VisitView.
+        Only waiting visits move, and only before another waiting visit on the same day at the
+        same location. Moving a visit to where it already is changes nothing. The token never
+        changes. Two moves of the same list at once are taken in turn, and each lands where it
+        asked to. Audited as visit.move; sends no notification. Permission visit.update.
+
+        VALIDATION_ERROR when before is the visit itself or is on another day. NOT_FOUND when
+        either visit is not on this clinic's list at this location. CONFLICT when either visit
+        is with the doctor or already seen (details { visitId, status }), or when another move
+        of the same list held it for too long.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { $ref: '#/components/parameters/LocationId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [before]
+              properties:
+                before: { type: string, nullable: true, description: 'A visit id, or null for the end' }
+      responses:
+        '200': { description: The moved visit }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: CONFLICT }
+
+  /prescriptions:
+    get:
+      tags: [Prescriptions]
+      summary: Prescriptions at this location, newest first
+      description: |
+        Items are prescriptionListItemSchema: a PrescriptionView plus
+        patient { id, name, age, sex, mrNo } (null if the patient was removed).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { $ref: '#/components/parameters/LocationId' }
+        - { in: query, name: patientId, schema: { type: string } }
+        - { in: query, name: status, schema: { type: string, enum: [draft, approved, superseded, cancelled] } }
+        - {
+            in: query,
+            name: from,
+            description: 'Karachi day, inclusive (YYYY-MM-DD)',
+            schema: { type: string, format: date },
+          }
+        - { in: query, name: to, description: 'Karachi day, inclusive (YYYY-MM-DD)', schema: { type: string, format: date } }
+        - { in: query, name: q, description: "A patient's name, phone or MR number", schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: One page of prescriptions }
+
+  /prescriptions/from-template/{id}:
+    post:
+      tags: [Prescriptions, Templates]
+      summary: Start a prescription from one of the doctor's templates
+      description: |
+        Body createFromTemplateBodySchema { patientId, visitId? }; {id} is the template.
+        201 with a new draft (source template), or 200 when the visit already had an open
+        draft and the template's lines were added to it - nothing already there is removed,
+        and a line it already has is not added twice. Counts as a use of the template.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { $ref: '#/components/parameters/LocationId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 'The open draft, with the template added' }
+        '201': { description: A new draft from the template }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /templates:
+    get:
+      tags: [Templates]
+      summary: The calling doctor's templates, most used first
+      description: Items are templateViewSchema. Each doctor sees only their own.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, description: Any part of the name, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: One page of templates }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Templates]
+      summary: Make a template
+      description: |
+        Body createTemplateBodySchema: name, plus either sections or fromPrescriptionId
+        ("Save as template", from an approved prescription; its complaints, history and
+        examination are left behind). The follow-up date, flags and source spans are never kept.
+        CONFLICT when the doctor already has a template of that name; RX_NOT_APPROVED for a
+        prescription that is not approved.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: The template }
+        '400': { description: VALIDATION_ERROR }
+        '409': { description: CONFLICT or RX_NOT_APPROVED }
+
+  /templates/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Templates]
+      summary: One of the doctor's templates
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The template }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Templates]
+      summary: Rename it, or replace its sections
+      description: Body updateTemplateBodySchema { name?, sections? }. sections replaces the whole set.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The template }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: "CONFLICT - another of the doctor's templates has that name" }
+    delete:
+      tags: [Templates]
+      summary: Delete it (soft)
+      description: Answers with the template as it was.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The deleted template }
+        '404': { $ref: '#/components/responses/NotFound' }

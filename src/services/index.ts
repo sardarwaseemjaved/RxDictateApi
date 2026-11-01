@@ -15,6 +15,8 @@ export * as reportService from './report.service';
 export * as sessionService from './session.service';
 export * as sttService from './stt.service';
 export * as teamService from './team.service';
+export * as templateService from './template.service';
+export * as historyService from './history.service';
 export * as tokenService from './token.service';
 export * as visitService from './visit.service';
 export * as vitalsService from './vitals.service';

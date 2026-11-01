@@ -11,21 +11,25 @@ import { generalLimiter } from './middlewares/rateLimiter';
 import routes from './routes/v1';
 import { errorConverter, errorHandler } from './middlewares/error';
 import { AppError } from './core/errors';
+import logger from './config/logger';
 // Registers the event handlers. Imported for the side effect, on purpose.
 import './listeners';
 
 const app = express();
 
+// So req.ip is the client and not nginx. See TRUST_PROXY in config.
+app.set('trust proxy', config.trustProxy);
+
 /**
  * The request pipeline, in the order it runs:
  *
- *   requestId -> logger -> rateLimit -> [per route] requireAuth ->
- *   resolvePractice -> resolveLocation -> can(action) -> validate(schema) ->
- *   handler -> errorHandler
+ *   requestId -> access logger -> voice upload ingress logger -> rateLimit ->
+ *   [per route] requireAuth -> resolvePractice -> resolveLocation ->
+ *   can(action) -> validate(schema) -> handler -> errorHandler
  *
- * The first three are here because they apply to everything, including a 404.
- * The rest are declared on each route, so reading a route file tells you
- * exactly who may call it and with what.
+ * The shared middleware is here because it applies before routing. The rest is
+ * declared on each route, so reading a route file tells you exactly who may
+ * call it and with what.
  */
 app.use(requestId);
 
@@ -33,6 +37,26 @@ if (!config.isTest) {
   app.use(morgan.successHandler);
   app.use(morgan.errorHandler);
 }
+
+/**
+ * Log voice uploads at the request boundary, before JSON parsing and route
+ * validation. This distinguishes a client-side file/base64 failure (no log at
+ * all) from a request that reached Express but was interrupted or rejected.
+ * Never log the request body: it contains the recording.
+ */
+app.use((req, _res, next) => {
+  if (req.method === 'POST' && /^\/api\/v1\/prescriptions\/[^/]+\/voice\/segments$/.test(req.path)) {
+    const id = req.id ?? '-';
+    logger.info(
+      `[voice] upload ingress requestId=${id} contentType=${req.get('content-type') ?? '-'} ` +
+        `contentLength=${req.get('content-length') ?? 'unknown'} transferEncoding=${req.get('transfer-encoding') ?? '-'}`,
+    );
+    req.once('aborted', () => {
+      logger.warn(`[voice] upload aborted by client requestId=${id} receivedBytes=${req.socket.bytesRead}`);
+    });
+  }
+  next();
+});
 
 // set security HTTP headers
 app.use(helmet());
@@ -59,6 +83,11 @@ app.use(compression());
  * A request with no Origin header is allowed through: that is the React Native
  * app, which is not a browser and sends none. Browsers always send one, so the
  * check still does its job where it matters.
+ *
+ * This covers /files too, which the web app PUTs report pages to under the
+ * local storage driver. That PUT carries a Content-Type of image/jpeg or
+ * application/pdf, so the browser preflights it; PUT and Content-Type are both
+ * allowed here, and ETag is exposed the way a bucket's CORS rule exposes it.
  */
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
@@ -68,8 +97,9 @@ const corsOptions: CorsOptions = {
     return callback(new AppError('FORBIDDEN', 'Origin not allowed'));
   },
   credentials: true,
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Practice-Id', 'X-Location-Id', 'X-Request-Id'],
-  exposedHeaders: ['X-Request-Id'],
+  exposedHeaders: ['X-Request-Id', 'ETag'],
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));

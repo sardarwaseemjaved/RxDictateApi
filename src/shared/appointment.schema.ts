@@ -5,6 +5,11 @@ import { patientViewSchema } from './patient.schema';
 export const appointmentKindSchema = z.enum(['follow_up', 'new_problem']);
 export type AppointmentKind = z.infer<typeof appointmentKindSchema>;
 
+/**
+ * `arrived` is set by the server when a visit is created for the patient on
+ * the appointment's day at its location. The Schedule lists `booked` and
+ * `arrived` together; `cancelled` drops off it.
+ */
 export const appointmentStatusSchema = z.enum(['booked', 'cancelled', 'arrived']);
 export type AppointmentStatus = z.infer<typeof appointmentStatusSchema>;
 

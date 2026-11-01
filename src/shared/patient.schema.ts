@@ -46,6 +46,14 @@ export const patientViewSchema = z.object({
 export type PatientView = z.infer<typeof patientViewSchema>;
 
 /**
+ * Enough to put a name on a row: a list of prescriptions shows who each one is
+ * for without a patient request per row. A subset of PatientView, so the same
+ * patient reads the same everywhere.
+ */
+export const patientSummarySchema = patientViewSchema.pick({ id: true, name: true, age: true, sex: true, mrNo: true });
+export type PatientSummary = z.infer<typeof patientSummarySchema>;
+
+/**
  * Age is accepted as an alternative to a date of birth because most patients
  * do not know theirs. When a dob is given it wins and age is derived from it.
  */
@@ -86,8 +94,12 @@ export const updatePatientBodySchema = z
 export type UpdatePatientBody = z.infer<typeof updatePatientBodySchema>;
 
 /**
- * Patient search is practice-wide on purpose: a patient who was first seen at
- * one location must be findable at another without being typed in twice.
+ * The doctor's patient search is practice-wide on purpose: a patient who was
+ * first seen at one location must be findable at another without being typed
+ * in twice. An assistant's covers the patients linked to the locations they
+ * work at - registered, seen or booked there - plus anyone whose whole phone
+ * number they type, so a patient arriving at a second location is added to the
+ * list there rather than registered again.
  *
  * `q` matches a name, an MR number (with or without the `MR-` prefix, in any
  * case) or the start of a phone number. A bare number is tried as both an MR

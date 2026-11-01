@@ -4,8 +4,8 @@ import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
 import { aClinic, aPa, headersFor, pause, signIn, signUp, type SignedIn } from '../fixtures/clinic.fixture';
 import { provider as smsProvider } from '../../src/core/sms';
-import { Membership, Notification, Patient, Visit } from '../../src/models';
-import { todayInKarachi } from '../../src/utils/time';
+import { Appointment, AuditLog, Membership, Notification, Patient, Visit } from '../../src/models';
+import { addDays, addMinutes, karachiDay, karachiDayRange, todayInKarachi } from '../../src/utils/time';
 
 setupTestDB();
 
@@ -442,17 +442,23 @@ describe('The assistant flow', () => {
       expect(detail.body.data.pageUrls).toHaveLength(2);
     });
 
-    test('the upload ticket says so plainly when storage is not configured', async () => {
+    test('the local storage driver hands out an upload link of its own', async () => {
       const { doctor } = await aClinic('+923007770032');
 
-      // The suite runs the local driver, which cannot sign an upload.
+      // The suite runs the local driver, which now signs uploads to /files the
+      // way it signs downloads. files.test.ts follows the link.
       const response = await request(app)
         .post('/api/v1/reports/uploads')
         .set(headersFor(doctor))
         .send({ contentType: 'image/jpeg', size: 1024 })
-        .expect(503);
-      expect(response.body.error.code).toBe('STORAGE_UNAVAILABLE');
-      expect(response.body.error.message).toContain('STORAGE_DRIVER=s3');
+        .expect(201);
+
+      const url = new URL(response.body.data.uploadUrl);
+      expect(url.pathname).toBe(`/api/v1/files/${response.body.data.fileKey}`);
+      expect(url.searchParams.get('ct')).toBe('image/jpeg');
+      expect(url.searchParams.get('size')).toBe('1024');
+      expect(url.searchParams.get('sig')).toMatch(/^[0-9a-f]{64}$/);
+      expect(response.body.data.fileKey.startsWith(`${doctor.practiceId}/reports/pages/`)).toBe(true);
     });
 
     test('refuses a file type or a size the contract does not allow', async () => {
@@ -498,6 +504,90 @@ describe('The assistant flow', () => {
         .set(patientHeaders)
         .send({ type: 'lab', testName: 'CBC', testDate: '2026-10-01', pageKeys: ['x'] })
         .expect(403);
+    });
+  });
+
+  describe('reviewing a report', () => {
+    const aReport = async (doctor: SignedIn, patientId: string, headers: Record<string, string> = headersFor(doctor)) => {
+      const created = await request(app)
+        .post(`/api/v1/patients/${patientId}/reports`)
+        .set(headers)
+        .send({
+          type: 'lab',
+          testName: 'CBC',
+          testDate: '2026-10-01',
+          pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`],
+        })
+        .expect(201);
+      return created.body.data.id as string;
+    };
+
+    test('the doctor marks it reviewed, and it stops being new', async () => {
+      const { doctor, patientId } = await aClinic('+923022220001');
+      const pa = await aPa(doctor, '+923022220002');
+      const paHeaders = { Authorization: `Bearer ${pa.accessToken}`, 'X-Practice-Id': doctor.practiceId };
+      const reportId = await aReport(doctor, patientId, paHeaders);
+
+      const before = await request(app).get('/api/v1/patients').query({ newReports: 'true' }).set(headersFor(doctor));
+      expect(before.body.data.map((p: { id: string }) => p.id)).toEqual([patientId]);
+      expect(before.body.meta.counts.newReports).toBe(1);
+
+      const reviewed = await request(app).post(`/api/v1/reports/${reportId}/review`).set(headersFor(doctor)).expect(200);
+      expect(reviewed.body.data).toMatchObject({ id: reportId, reviewedBy: doctor.userId, uploadedBy: pa.userId });
+      expect(reviewed.body.data.reviewedAt).not.toBeNull();
+
+      // The assistant who filed it sees it reviewed too.
+      const seen = await request(app).get(`/api/v1/reports/${reportId}`).set(paHeaders).expect(200);
+      expect(seen.body.data.reviewedBy).toBe(doctor.userId);
+
+      const after = await request(app).get('/api/v1/patients').query({ newReports: 'true' }).set(headersFor(doctor));
+      expect(after.body.data).toHaveLength(0);
+      expect(after.body.meta.counts.newReports).toBe(0);
+    });
+
+    test('is idempotent: reviewing again keeps the first time, and audits once', async () => {
+      const { doctor, patientId } = await aClinic('+923022220003');
+      const reportId = await aReport(doctor, patientId);
+
+      const first = await request(app).post(`/api/v1/reports/${reportId}/review`).set(headersFor(doctor)).expect(200);
+      await pause(20);
+      const second = await request(app).post(`/api/v1/reports/${reportId}/review`).set(headersFor(doctor)).expect(200);
+
+      expect(second.body.data.reviewedAt).toBe(first.body.data.reviewedAt);
+      expect(await AuditLog.countDocuments({ action: 'report.review', entityId: new Types.ObjectId(reportId) })).toBe(1);
+    });
+
+    test('a new report carries no reviewer yet', async () => {
+      const { doctor, patientId } = await aClinic('+923022220004');
+      const reportId = await aReport(doctor, patientId);
+
+      const report = await request(app).get(`/api/v1/reports/${reportId}`).set(headersFor(doctor)).expect(200);
+      expect(report.body.data).toMatchObject({ reviewedAt: null, reviewedBy: null });
+    });
+
+    test("is the doctor's alone, and tells nobody", async () => {
+      const { doctor, patientId } = await aClinic('+923022220005');
+      const pa = await aPa(doctor, '+923022220006');
+      const paHeaders = { Authorization: `Bearer ${pa.accessToken}`, 'X-Practice-Id': doctor.practiceId };
+      const reportId = await aReport(doctor, patientId);
+
+      const refused = await request(app).post(`/api/v1/reports/${reportId}/review`).set(paHeaders).expect(403);
+      expect(refused.body.error.code).toBe('FORBIDDEN');
+
+      await request(app).post(`/api/v1/reports/${reportId}/review`).set(headersFor(doctor)).expect(200);
+      await pause(150);
+      expect(
+        await Notification.countDocuments({ refId: new Types.ObjectId(reportId), type: { $ne: 'report.uploaded' } }),
+      ).toBe(0);
+    });
+
+    test("another clinic's report is not found", async () => {
+      const a = await aClinic('+923022220007');
+      const b = await aClinic('+923022220008');
+      const reportId = await aReport(b.doctor, b.patientId);
+
+      const response = await request(app).post(`/api/v1/reports/${reportId}/review`).set(headersFor(a.doctor)).expect(404);
+      expect(response.body.error.code).toBe('NOT_FOUND');
     });
   });
 
@@ -576,6 +666,196 @@ describe('The assistant flow', () => {
         .query({ from: '2026-11-09', to: '2026-11-01' })
         .set(headersFor(doctor, { location: true }))
         .expect(400);
+    });
+  });
+
+  describe('a patient who came for their appointment', () => {
+    /** Ten in the morning, Karachi time, on a day counted from today. */
+    const tenAm = (daysFromToday = 0): string =>
+      addMinutes(addDays(karachiDayRange(todayInKarachi()).start, daysFromToday), 10 * 60).toISOString();
+
+    const book = async (headers: Record<string, string>, patientId: string, when: string) => {
+      const booked = await request(app)
+        .post('/api/v1/appointments')
+        .set(headers)
+        .send({ patientId, at: when, kind: 'follow_up' })
+        .expect(201);
+      return booked.body.data.id as string;
+    };
+
+    test('is marked arrived when they are put on the list, and the Schedule shows it', async () => {
+      const { doctor, patientId } = await aClinic('+923026660001');
+      const headers = headersFor(doctor, { location: true });
+      const appointmentId = await book(headers, patientId, tenAm());
+
+      await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+
+      const schedule = await request(app)
+        .get('/api/v1/appointments')
+        .query({ from: todayInKarachi(), to: todayInKarachi() })
+        .set(headers)
+        .expect(200);
+      expect(schedule.body.data).toHaveLength(1);
+      expect(schedule.body.data[0]).toMatchObject({ id: appointmentId, status: 'arrived' });
+      expect(schedule.body.meta.countsByDay).toEqual({ [todayInKarachi()]: 1 });
+
+      const audit = await AuditLog.findOne({ action: 'appointment.arrive' });
+      expect(String(audit?.entityId)).toBe(appointmentId);
+    });
+
+    test('also when the doctor starts a prescription, which puts them on the list', async () => {
+      const { doctor, patientId } = await aClinic('+923026660002');
+      const headers = headersFor(doctor, { location: true });
+      const appointmentId = await book(headers, patientId, tenAm());
+
+      await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
+
+      expect((await Appointment.findById(appointmentId))?.status).toBe('arrived');
+    });
+
+    test('only that day and that location: other bookings stay booked', async () => {
+      const { doctor, patientId } = await aClinic('+923026660003');
+      const headers = headersFor(doctor, { location: true });
+      const branch = await request(app)
+        .post('/api/v1/locations')
+        .set(headersFor(doctor))
+        .send({ name: 'Branch' })
+        .expect(201);
+      const branchHeaders = headersFor(doctor, { location: branch.body.data.id });
+
+      const tomorrow = await book(headers, patientId, tenAm(1));
+      const elsewhere = await book(branchHeaders, patientId, tenAm());
+
+      await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+
+      expect((await Appointment.findById(tomorrow))?.status).toBe('booked');
+      expect((await Appointment.findById(elsewhere))?.status).toBe('booked');
+    });
+
+    test('a cancelled booking is not brought back', async () => {
+      const { doctor, patientId } = await aClinic('+923026660004');
+      const headers = headersFor(doctor, { location: true });
+      const appointmentId = await book(headers, patientId, tenAm());
+      await request(app).post(`/api/v1/appointments/${appointmentId}/cancel`).set(headers).expect(200);
+
+      await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+
+      expect((await Appointment.findById(appointmentId))?.status).toBe('cancelled');
+    });
+
+    test('an appointment never makes a visit on its own', async () => {
+      const { doctor, patientId } = await aClinic('+923026660005');
+      const headers = headersFor(doctor, { location: true });
+      await book(headers, patientId, tenAm());
+
+      expect(await Visit.countDocuments({ patientId: new Types.ObjectId(patientId) })).toBe(0);
+    });
+
+    test('a follow-up they arrived for stays off the to-book list', async () => {
+      const { doctor, patientId } = await aClinic('+923026660006');
+      const headers = headersFor(doctor, { location: true });
+
+      const draft = await request(app).post('/api/v1/prescriptions').set(headers).send({ patientId }).expect(201);
+      await request(app)
+        .patch(`/api/v1/prescriptions/${draft.body.data.id}`)
+        .set(headers)
+        .send({
+          ops: [
+            { op: 'add', section: 'medicines', value: { name: 'Panadol' } },
+            { op: 'update', section: 'followUp', value: { date: todayInKarachi() } },
+          ],
+        })
+        .expect(200);
+      await request(app).post(`/api/v1/prescriptions/${draft.body.data.id}/approve`).set(headers).expect(200);
+
+      // Booked against the prescription for tomorrow, then the patient turns up
+      // on that day - here, simulated by a visit dated tomorrow.
+      const booked = await request(app)
+        .post('/api/v1/appointments')
+        .set(headers)
+        .send({ patientId, at: tenAm(1), kind: 'follow_up', prescriptionId: draft.body.data.id })
+        .expect(201);
+      const tomorrow = karachiDay(addDays(new Date(), 1));
+      await request(app).post('/api/v1/visits').set(headers).send({ patientId, date: tomorrow }).expect(201);
+      expect((await Appointment.findById(booked.body.data.id))?.status).toBe('arrived');
+
+      const toBook = await request(app).get('/api/v1/follow-ups').set(headers).expect(200);
+      expect(toBook.body.data).toHaveLength(0);
+    });
+  });
+
+  describe('a booking reaches the assistants', () => {
+    const paHeadersFor = (doctor: SignedIn, pa: SignedIn, locationId: string) => ({
+      Authorization: `Bearer ${pa.accessToken}`,
+      'X-Practice-Id': doctor.practiceId,
+      'X-Location-Id': locationId,
+    });
+
+    test('at that location, but not whoever booked it, and not the doctor', async () => {
+      const { doctor, patientId } = await aClinic('+923026660010');
+      const branch = await request(app)
+        .post('/api/v1/locations')
+        .set(headersFor(doctor))
+        .send({ name: 'Branch' })
+        .expect(201);
+
+      const booker = await aPa(doctor, '+923026660011');
+      const colleague = await aPa(doctor, '+923026660012');
+      const atBranch = await aPa(doctor, '+923026660013', [branch.body.data.id]);
+      await pause(150);
+      await Notification.deleteMany({});
+
+      const booked = await request(app)
+        .post('/api/v1/appointments')
+        .set(paHeadersFor(doctor, booker, doctor.locationId))
+        .send({ patientId, at: '2026-11-02T05:00:00.000Z', kind: 'new_problem' })
+        .expect(201);
+      await pause(200);
+
+      const told = await Notification.find({ type: 'appointment.booked' });
+      expect(told.map((n) => String(n.userId))).toEqual([colleague.userId]);
+      expect(String(told[0].refId)).toBe(booked.body.data.id);
+      // 10:00 in Karachi on the 2nd, which is the day the patient was told.
+      expect(told[0].body).toContain('2026-11-02');
+
+      expect(told.map((n) => String(n.userId))).not.toContain(atBranch.userId);
+      expect(told.map((n) => String(n.userId))).not.toContain(doctor.userId);
+    });
+
+    test('the day in the message is the Karachi day, not the UTC one', async () => {
+      const { doctor, patientId } = await aClinic('+923026660014');
+      await aPa(doctor, '+923026660015');
+      await pause(150);
+
+      // 21:00 UTC on the 2nd is 02:00 on the 3rd in Karachi.
+      await request(app)
+        .post('/api/v1/appointments')
+        .set(headersFor(doctor, { location: true }))
+        .send({ patientId, at: '2026-11-02T21:00:00.000Z', kind: 'new_problem' })
+        .expect(201);
+      await pause(200);
+
+      const told = await Notification.findOne({ type: 'appointment.booked' });
+      expect(told?.body).toContain('2026-11-03');
+    });
+
+    test('a booking the doctor makes reaches the assistant at that location', async () => {
+      const { doctor, patientId } = await aClinic('+923026660016');
+      const pa = await aPa(doctor, '+923026660017');
+      await pause(150);
+
+      await request(app)
+        .post('/api/v1/appointments')
+        .set(headersFor(doctor, { location: true }))
+        .send({ patientId, at: '2026-11-04T05:00:00.000Z', kind: 'follow_up' })
+        .expect(201);
+      await pause(200);
+
+      const paInbox = await request(app)
+        .get('/api/v1/notifications')
+        .set({ Authorization: `Bearer ${pa.accessToken}`, 'X-Practice-Id': doctor.practiceId })
+        .expect(200);
+      expect(paInbox.body.data.map((n: { type: string }) => n.type)).toContain('appointment.booked');
     });
   });
 

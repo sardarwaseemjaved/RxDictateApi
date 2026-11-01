@@ -11,12 +11,20 @@ import { toJSON } from './plugins';
  * a number as soon as a row is removed, and two people adding a patient in the
  * same second both read the same max.
  *
- * `key` is the scope: `visitToken:<locationId>:<YYYY-MM-DD>`.
+ * `key` is the scope: `visitToken:<locationId>:<YYYY-MM-DD>`, or
+ * `visitQueue:<locationId>:<YYYY-MM-DD>` for the lease below.
  */
 export interface ICounter {
   practiceId: Types.ObjectId;
   key: string;
   seq: number;
+  /**
+   * Only on `visitQueue` rows: a short lease held while one move rewrites a
+   * day's positions, so two people rearranging the same list take turns rather
+   * than each working from what the other is about to change. `seq` counts the
+   * leases taken, and is how the holder knows the lease is still its own.
+   */
+  lockedUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +36,7 @@ const counterSchema = new Schema<ICounter>(
     practiceId: { type: Schema.Types.ObjectId, ref: 'Practice', required: true },
     key: { type: String, required: true },
     seq: { type: Number, default: 0 },
+    lockedUntil: { type: Date, default: null },
   },
   { timestamps: true },
 );

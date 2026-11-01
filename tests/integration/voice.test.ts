@@ -3,6 +3,7 @@ import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
 import { aClinic, aDraft, dictate, headersFor, speak, waitFor, type SignedIn } from '../fixtures/clinic.fixture';
 import { Prescription, VoiceSession } from '../../src/models';
+import { voiceSessionViewSchema } from '../../src/shared/voice.schema';
 
 setupTestDB();
 
@@ -31,6 +32,78 @@ const settled = async (doctor: SignedIn, prescriptionId: string, seq: number) =>
 };
 
 describe('Voice dictation', () => {
+  describe('polling before the first recording', () => {
+    test('returns a valid empty session and never a bodyless 304', async () => {
+      const { doctor, patientId } = await aClinic('+923003330000');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId, 'voice');
+      const url = `/api/v1/prescriptions/${draft.id}/voice`;
+
+      const first = await request(app).get(url).set(headers).expect(200);
+      expect(first.headers['cache-control']).toBe('no-store');
+      expect(voiceSessionViewSchema.parse(first.body.data)).toMatchObject({
+        prescriptionId: draft.id,
+        status: 'open',
+        segments: [],
+        audioDeleteAfter: null,
+      });
+
+      const revalidated = await request(app)
+        .get(url)
+        .set(headers)
+        .set('If-None-Match', first.headers.etag as string)
+        .expect(200);
+      expect(revalidated.body.data.id).toBe(first.body.data.id);
+      expect(revalidated.body.data.segments).toEqual([]);
+      expect(await VoiceSession.countDocuments({ prescriptionId: draft.id })).toBe(1);
+    });
+
+    test('the first upload uses the empty session and sequence 1', async () => {
+      const { doctor, patientId } = await aClinic('+923003330099');
+      const headers = headersFor(doctor, { location: true });
+      const draft = await aDraft(doctor, patientId, 'voice');
+
+      const empty = await request(app).get(`/api/v1/prescriptions/${draft.id}/voice`).set(headers).expect(200);
+      const accepted = await upload(
+        doctor,
+        draft.id,
+        1,
+        dictate([{ op: 'add', section: 'advice', value: { text: 'Rest' } }]),
+      ).expect(201);
+
+      expect(accepted.body.data.seq).toBe(1);
+      const session = await VoiceSession.findOne({ prescriptionId: draft.id });
+      expect(String(session?._id)).toBe(empty.body.data.id);
+      expect(session?.segments).toHaveLength(1);
+    });
+
+    test('repairs the timestamp duration sent by the older Android build', async () => {
+      const { doctor, patientId } = await aClinic('+923003330098');
+      const draft = await aDraft(doctor, patientId, 'voice');
+      const audioBase64 = dictate([{ op: 'add', section: 'advice', value: { text: 'Rest' } }]);
+
+      const accepted = await request(app)
+        .post(`/api/v1/prescriptions/${draft.id}/voice/segments`)
+        .set(headersFor(doctor, { location: true }))
+        .send({
+          seq: 1,
+          durationMs: 1_760_000_000_000_000,
+          contentType: 'audio/m4a',
+          audioBase64,
+        })
+        .expect(201);
+
+      expect(accepted.body.data.audio.durationMs).toBeGreaterThanOrEqual(1000);
+      expect(accepted.body.data.audio.durationMs).toBeLessThanOrEqual(30 * 60 * 1000);
+
+      await request(app)
+        .post(`/api/v1/prescriptions/${draft.id}/voice/segments`)
+        .set(headersFor(doctor, { location: true }))
+        .send({ seq: 2, durationMs: 30 * 60 * 1000 + 1, contentType: 'audio/m4a', audioBase64 })
+        .expect(400);
+    });
+  });
+
   /**
    * Rule 6. Voice does not write to a prescription: it produces ops, and the
    * server decides whether they are allowed anywhere near a section.

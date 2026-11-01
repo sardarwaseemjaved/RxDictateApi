@@ -70,6 +70,18 @@ describe('Config', () => {
       delete process.env.CORS_ORIGINS;
       expect(load().cors.origins).toContain('http://localhost:8081');
     });
+
+    test("the web app's dev server is a default, so a browser upload works out of the box", () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.CORS_ORIGINS;
+      expect(load().cors.origins).toContain('http://localhost:5173');
+    });
+
+    test('setting CORS_ORIGINS replaces the defaults rather than adding to them', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.CORS_ORIGINS = 'http://localhost:8081';
+      expect(load().cors.origins).toEqual(['http://localhost:8081']);
+    });
   });
 
   describe('the OpenAI key', () => {

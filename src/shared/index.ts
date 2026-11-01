@@ -25,6 +25,7 @@ export * from './vitals.schema';
 export * from './report.schema';
 export * from './appointment.schema';
 export * from './history.schema';
+export * from './template.schema';
 export * from './voice.schema';
 export * from './drug.schema';
 export * from './notification.schema';

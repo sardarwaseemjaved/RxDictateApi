@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import logger from '../config/logger';
 import {
+  Lab,
   Location,
   Patient,
   Practice,
@@ -9,7 +10,9 @@ import {
   Visit,
   Vital,
   VoiceSession,
+  type IPatient,
   type IPrescription,
+  type PatientDoc,
   type PrescriptionDoc,
   type VisitDoc,
 } from '../models';
@@ -19,23 +22,32 @@ import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
 import { signedGetUrl } from '../core/storage';
 import type {
+  CreateFromTemplateBody,
   CreatePrescriptionBody,
   LetterheadSnapshot,
   ListPrescriptionsQuery,
+  Op,
   PatchPrescriptionBody,
+  PrescriptionListItem,
+  PrescriptionSections,
+  PrescriptionSource,
   PrescriptionView,
+  PrintLanguage,
   RevisePrescriptionBody,
 } from '../shared/prescription.schema';
-import { prescriptionSectionsSchema, prescriptionViewSchema } from '../shared/prescription.schema';
+import { LIST_SECTIONS, prescriptionSectionsSchema, prescriptionViewSchema } from '../shared/prescription.schema';
 import type { PageMeta, SignedUrlView } from '../shared';
-import { addDays, ageFromDob } from '../utils/time';
+import { addDays, ageFromDob, karachiDayRange } from '../utils/time';
 import { applyOps, isEmpty, wireSections } from './prescriptionOps.service';
 import { nextPrescriptionNumber } from './counter.service';
 import { findOrCreateDrug } from './drug.service';
+import { findPatientOrFail, linkPatient, patientMatch, toPatientSummary, visiblePatients } from './patient.service';
 import { renderPrescription, renderPreview } from './pdf.service';
+import { findOwnTemplate, markTemplateUsed } from './template.service';
 import { changeVisitStatus, ensureVisit } from './visit.service';
 
 const prescriptions = new BaseRepository<IPrescription>(Prescription, { locationScoped: true });
+const patients = new BaseRepository<IPatient>(Patient);
 
 /**
  * The shape the app reads, parsed through the contract rather than assembled
@@ -115,13 +127,54 @@ const assertDraft = (prescription: PrescriptionDoc): void => {
 export const getPrescriptionDoc = async (scope: Scope, id: string): Promise<PrescriptionDoc> =>
   prescriptions.findByIdOrFail(scope, id, 'Prescription');
 
+/**
+ * The patients a typed `q` names, matched as patient search matches them and
+ * among the ones this member may see.
+ *
+ * Two indexed reads rather than one join: the patient indexes find the ids,
+ * and (practiceId, patientId, createdAt) finds their prescriptions.
+ */
+const patientIdsMatching = async (scope: Scope, q: string): Promise<Types.ObjectId[]> => {
+  const found = await Patient.find(patients.scopedFilter(scope, { ...patientMatch(q), ...visiblePatients(scope) })).select(
+    '_id',
+  );
+  return found.map((patient) => patient._id);
+};
+
+/**
+ * Every prescription at this location, newest first, each with who it is for.
+ *
+ * The patients are fetched once for the page rather than once per row, which
+ * is the request the History page would otherwise have made itself.
+ */
 export const listPrescriptions = async (
   scope: Scope,
   query: ListPrescriptionsQuery,
-): Promise<{ prescriptions: ReturnType<typeof toPrescriptionView>[]; meta: PageMeta }> => {
+): Promise<{ prescriptions: PrescriptionListItem[]; meta: PageMeta }> => {
   const filter: Record<string, unknown> = {};
-  if (query.patientId) filter.patientId = new Types.ObjectId(query.patientId);
   if (query.status) filter.status = query.status;
+
+  // Named by id, a patient this member may not see is NOT_FOUND here as it is
+  // everywhere else.
+  if (query.patientId) {
+    await findPatientOrFail(scope, query.patientId);
+  }
+
+  if (query.q) {
+    const named = await patientIdsMatching(scope, query.q);
+    filter.patientId = {
+      $in: query.patientId ? named.filter((id) => id.equals(query.patientId!)) : named,
+    };
+  } else if (query.patientId) {
+    filter.patientId = new Types.ObjectId(query.patientId);
+  }
+
+  if (query.from || query.to) {
+    filter.createdAt = {
+      ...(query.from ? { $gte: karachiDayRange(query.from).start } : {}),
+      ...(query.to ? { $lt: karachiDayRange(query.to).end } : {}),
+    };
+  }
 
   const result = await prescriptions.paginate(scope, filter, {
     page: query.page,
@@ -129,15 +182,23 @@ export const listPrescriptions = async (
     sortBy: 'createdAt:desc',
   });
 
-  const revisions = await openRevisions(
-    scope,
-    result.results.map((prescription) => prescription._id),
-  );
+  const [revisions, named] = await Promise.all([
+    openRevisions(
+      scope,
+      result.results.map((prescription) => prescription._id),
+    ),
+    patients.find(scope, { _id: { $in: result.results.map((prescription) => prescription.patientId) } }),
+  ]);
+  const patientsById = new Map(named.map((patient) => [String(patient._id), patient]));
 
   return {
-    prescriptions: result.results.map((prescription) =>
-      toPrescriptionView(prescription, revisions.get(String(prescription._id)) ?? null),
-    ),
+    prescriptions: result.results.map((prescription) => {
+      const patient = patientsById.get(String(prescription.patientId));
+      return {
+        ...toPrescriptionView(prescription, revisions.get(String(prescription._id)) ?? null),
+        patient: patient ? toPatientSummary(patient) : null,
+      };
+    }),
     meta: { page: result.page, limit: result.limit, total: result.totalResults, totalPages: result.totalPages },
   };
 };
@@ -149,48 +210,56 @@ export const getPrescription = async (scope: Scope, id: string) => {
 };
 
 /**
- * Start a prescription, or hand back the one that is already open.
+ * The patient, and the visit a prescription for them belongs to.
+ *
+ * With no visitId, the patient is put on today's list here. A doctor working
+ * alone should not have to think about a queue: writing a prescription is what
+ * says the consultation is happening, and the visit it needs is created or
+ * found by that act.
+ */
+const patientAndVisit = async (
+  scope: Scope,
+  body: { patientId: string; visitId?: string | null },
+): Promise<{ patient: PatientDoc; visit: VisitDoc }> => {
+  const patient = await findPatientOrFail(scope, body.patientId);
+
+  if (body.visitId) {
+    const visit = await Visit.findOne({ _id: body.visitId, practiceId: scope.practiceId, deletedAt: null });
+    if (!visit) {
+      throw AppError.notFound('Visit');
+    }
+    // A prescription written here links the patient here, as the visit it
+    // would otherwise have opened would have, so the assistant who prints it
+    // can open the patient too.
+    if (scope.locationId) {
+      await linkPatient(scope.practiceId, patient._id, scope.locationId);
+    }
+    return { patient, visit };
+  }
+
+  // The find-or-create: a patient seen earlier today keeps the visit and the
+  // token they already have.
+  return { patient, visit: (await ensureVisit(scope, patient)).visit };
+};
+
+/**
+ * The visit's open draft, or a new one.
  *
  * A visit has one draft at a time. A double tap, or the doctor opening the
  * same patient on a second device, must not produce two half-written
  * prescriptions for one consultation - so an existing draft for the visit
  * comes back untouched, the same way adding a patient to today's list twice
- * returns the visit they are already on. `created` tells the controller
- * whether to answer 201 or 200.
- *
- * With no visitId, the patient is put on today's list here. A doctor working
- * alone should not have to think about a queue: writing a prescription is what
- * says the consultation is happening, and the visit it needs is created or
- * found by that act. The visit then moves from waiting to with_doctor, because
- * that is what has just become true.
+ * returns the visit they are already on. `created` says which happened.
  */
-export const createPrescription = async (
+const openDraft = async (
   scope: Scope,
-  body: CreatePrescriptionBody,
-): Promise<{ prescription: PrescriptionView; created: boolean }> => {
-  const patient = await Patient.findOne({ _id: body.patientId, practiceId: scope.practiceId, deletedAt: null });
-  if (!patient) {
-    throw AppError.notFound('Patient');
-  }
-
-  let visit: VisitDoc | null = null;
-  if (body.visitId) {
-    visit = await Visit.findOne({ _id: body.visitId, practiceId: scope.practiceId, deletedAt: null });
-    if (!visit) {
-      throw AppError.notFound('Visit');
-    }
-  } else {
-    // The find-or-create: a patient seen earlier today keeps the visit and the
-    // token they already have.
-    visit = (await ensureVisit(scope, patient)).visit;
-  }
-
+  patient: PatientDoc,
+  visit: VisitDoc,
+  init: { source: PrescriptionSource; printLanguage: PrintLanguage },
+): Promise<{ draft: PrescriptionDoc; created: boolean }> => {
   const open = await prescriptions.findOne(scope, { visitId: visit._id, status: 'draft' });
   if (open) {
-    // The consultation is starting, whether this call opened the draft or
-    // found it.
-    await changeVisitStatus(scope, visit, 'with_doctor');
-    return { prescription: toPrescriptionView(open), created: false };
+    return { draft: open, created: false };
   }
 
   let prescription: PrescriptionDoc;
@@ -200,8 +269,8 @@ export const createPrescription = async (
       visitId: visit._id,
       doctorId: scope.actorId,
       status: 'draft',
-      source: body.source,
-      printLanguage: body.printLanguage,
+      source: init.source,
+      printLanguage: init.printLanguage,
       sections: prescriptionSectionsSchema.parse({}),
       version: 1,
     });
@@ -212,8 +281,7 @@ export const createPrescription = async (
     if ((error as { code?: number }).code === 11000) {
       const winner = await prescriptions.findOne(scope, { visitId: visit._id, status: 'draft' });
       if (winner) {
-        await changeVisitStatus(scope, visit, 'with_doctor');
-        return { prescription: toPrescriptionView(winner), created: false };
+        return { draft: winner, created: false };
       }
     }
     throw error;
@@ -228,27 +296,142 @@ export const createPrescription = async (
    * other change, and only ever at creation: an existing draft above returns
    * before this runs, so a later edit is never overwritten.
    */
-  {
-    const vitals = await Vital.findOne({ visitId: visit._id, practiceId: scope.practiceId, deletedAt: null });
-    const complaints = vitals?.complaints?.trim();
-    if (complaints) {
-      const { sections, editLog } = applyOps(
-        wireSections(prescription.sections),
-        [{ op: 'add', section: 'complaints', itemId: null, value: { text: complaints }, spanIds: [] }],
-        { actorId: scope.actorId, origin: 'typed' },
-      );
-      prescription.set('sections', sections);
-      prescription.editLog.push(...editLog);
-      await prescription.save();
-    }
+  const vitals = await Vital.findOne({ visitId: visit._id, practiceId: scope.practiceId, deletedAt: null });
+  const complaints = vitals?.complaints?.trim();
+  if (complaints) {
+    const { sections, editLog } = applyOps(
+      wireSections(prescription.sections),
+      [{ op: 'add', section: 'complaints', itemId: null, value: { text: complaints }, spanIds: [] }],
+      { actorId: scope.actorId, origin: 'typed' },
+    );
+    prescription.set('sections', sections);
+    prescription.editLog.push(...editLog);
+    await prescription.save();
   }
 
-  // The patient is with the doctor now.
+  return { draft: prescription, created: true };
+};
+
+/**
+ * Start a prescription, or hand back the one that is already open. 201 for a
+ * new draft and 200 for the existing one, which `created` tells the
+ * controller.
+ *
+ * Either way the visit moves from waiting to with_doctor, because that is what
+ * has just become true.
+ */
+export const createPrescription = async (
+  scope: Scope,
+  body: CreatePrescriptionBody,
+): Promise<{ prescription: PrescriptionView; created: boolean }> => {
+  const { patient, visit } = await patientAndVisit(scope, body);
+  const { draft, created } = await openDraft(scope, patient, visit, {
+    source: body.source,
+    printLanguage: body.printLanguage,
+  });
+
+  // The consultation is starting, whether this call opened the draft or
+  // found it.
   await changeVisitStatus(scope, visit, 'with_doctor');
 
-  const after = toPrescriptionView(prescription);
-  await writeAudit(scope, { action: 'prescription.create', entity: 'prescription', entityId: prescription._id, after });
-  return { prescription: after, created: true };
+  const after = toPrescriptionView(draft);
+  if (created) {
+    await writeAudit(scope, { action: 'prescription.create', entity: 'prescription', entityId: draft._id, after });
+  }
+  return { prescription: after, created };
+};
+
+type Line = { text?: string; name?: string; strength?: string };
+
+/** Two lines are the same line when they say the same thing, whatever their ids. */
+const lineKey = (line: Line): string =>
+  (line.name !== undefined ? `${line.name}|${line.strength ?? ''}` : (line.text ?? '')).trim().toLowerCase();
+
+/**
+ * The ops that add a template's lines to a draft.
+ *
+ * Only adds. A line the draft already has is skipped rather than doubled, and
+ * the follow-up is taken from the template only when the draft has none, so
+ * nothing the doctor has written is removed or changed.
+ */
+const templateOps = (draft: PrescriptionSections, template: PrescriptionSections): Op[] => {
+  const ops: Op[] = [];
+
+  LIST_SECTIONS.forEach((section) => {
+    const present = new Set((draft[section] as Line[]).map(lineKey));
+    (template[section] as (Line & { id: string })[]).forEach(({ id: _id, ...value }) => {
+      const key = lineKey(value);
+      if (present.has(key)) {
+        return;
+      }
+      present.add(key);
+      ops.push({ op: 'add', section, itemId: null, value, spanIds: [] });
+    });
+  });
+
+  const asked = draft.followUp.inDays !== null || draft.followUp.date !== null || draft.followUp.note !== '';
+  const offered = template.followUp.inDays !== null || template.followUp.note !== '';
+  if (!asked && offered) {
+    const { inDays, note, bookByAssistant } = template.followUp;
+    ops.push({ op: 'update', section: 'followUp', itemId: null, value: { inDays, note, bookByAssistant }, spanIds: [] });
+  }
+
+  return ops;
+};
+
+/**
+ * Start a prescription from one of the doctor's own templates, or add a
+ * template to the draft the visit already has.
+ *
+ * A new draft is `source: 'template'`; adding to a draft that came from
+ * somewhere else makes it `mixed`. The lines go through the ops engine like
+ * every other change to a draft, so they are validated the same way and get
+ * fresh item ids, and with the `template` origin, so they are not counted as
+ * the doctor correcting the dictation. Every application counts as a use.
+ */
+export const createFromTemplate = async (
+  scope: Scope,
+  templateId: string,
+  body: CreateFromTemplateBody,
+): Promise<{ prescription: PrescriptionView; created: boolean }> => {
+  const template = await findOwnTemplate(scope, templateId);
+  const { patient, visit } = await patientAndVisit(scope, body);
+  const { draft, created } = await openDraft(scope, patient, visit, { source: 'template', printLanguage: 'en_ur' });
+
+  const current = wireSections(draft.sections);
+  const ops = templateOps(current, wireSections(template.sections));
+  if (ops.length > 0) {
+    const { sections } = applyOps(current, ops, { actorId: scope.actorId, origin: 'template' });
+    draft.set('sections', sections);
+  }
+  if (!created && draft.source !== 'template') {
+    draft.source = 'mixed';
+  }
+  await draft.save();
+
+  await changeVisitStatus(scope, visit, 'with_doctor');
+  await markTemplateUsed(scope, template);
+
+  const after = toPrescriptionView(draft);
+  await writeAudit(
+    scope,
+    created
+      ? {
+          action: 'prescription.create',
+          entity: 'prescription',
+          entityId: draft._id,
+          after: { ...after, templateId: String(template._id) },
+        }
+      : {
+          action: 'prescription.update',
+          entity: 'prescription',
+          entityId: draft._id,
+          before: { sections: current },
+          after: { sections: after.sections, templateId: String(template._id), ops: ops.length },
+        },
+  );
+
+  return { prescription: after, created };
 };
 
 /**
@@ -350,6 +533,45 @@ const buildLetterheadSnapshot = async (prescription: PrescriptionDoc, doctorName
 };
 
 /**
+ * The tests this prescription orders, one `labs` row per line, so each can
+ * carry a result later and the patient's history can show what was ordered.
+ *
+ * A revision orders again whatever it still wants, so the rows of the version
+ * it replaces are retired first - except a row somebody has recorded a result
+ * or a file against, which is part of the patient's record now.
+ */
+const recordOrderedLabs = async (scope: Scope, prescription: PrescriptionDoc): Promise<void> => {
+  if (prescription.previousVersionId) {
+    await Lab.updateMany(
+      {
+        practiceId: scope.practiceId,
+        prescriptionId: prescription.previousVersionId,
+        result: '',
+        fileKey: null,
+        deletedAt: null,
+      },
+      { $set: { deletedAt: new Date() } },
+    );
+  }
+
+  const { labs } = wireSections(prescription.sections);
+  if (labs.length === 0) {
+    return;
+  }
+  await Lab.insertMany(
+    labs.map((lab) => ({
+      practiceId: scope.practiceId,
+      patientId: prescription.patientId,
+      prescriptionId: prescription._id,
+      name: lab.text,
+      result: '',
+      fileKey: null,
+      createdBy: scope.actorId,
+    })),
+  );
+};
+
+/**
  * The signature. After this the document is immutable, the number is minted
  * from the practice counter, and the letterhead is frozen.
  */
@@ -418,6 +640,8 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
       });
     }
   }
+
+  await recordOrderedLabs(scope, prescription);
 
   /**
    * Signing the prescription is the end of the consultation, so the visit is
@@ -636,6 +860,7 @@ export default {
   listPrescriptions,
   getPrescription,
   createPrescription,
+  createFromTemplate,
   patchPrescription,
   approvePrescription,
   revisePrescription,

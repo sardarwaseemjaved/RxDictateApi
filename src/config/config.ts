@@ -32,6 +32,13 @@ const csv = () =>
 const envSchema = z.object({
   NODE_ENV: z.enum(['production', 'development', 'test']),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  /**
+   * How many proxies sit in front of this process. Behind nginx every request
+   * arrives from 127.0.0.1, and the rate limiters would put every client in one
+   * bucket - so a deployment behind a proxy sets 1. Zero by default, because
+   * trusting X-Forwarded-For with nothing in front lets a client pick its own IP.
+   */
+  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
 
   MONGODB_URL: z.string().min(1),
 
@@ -60,7 +67,10 @@ const envSchema = z.object({
     .optional()
     .transform((value) => (value === '' ? undefined : value)),
 
-  /** Comma separated list of origins the app and the web portal are served from. */
+  /**
+   * Comma separated list of origins the web app and the web portal are served
+   * from. Setting it replaces the dev defaults below rather than adding to them.
+   */
   CORS_ORIGINS: csv(),
 
   RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
@@ -154,7 +164,17 @@ if (usesOpenAi && !env.OPENAI_API_KEY) {
   throw new Error('Config validation error: OPENAI_API_KEY is required when STT_PROVIDER or LLM_PROVIDER is openai');
 }
 
-const defaultDevOrigins = ['http://localhost:3000', 'http://localhost:8081', 'http://localhost:19006'];
+/**
+ * 5173 is the web app's dev server. It calls this API from the browser and,
+ * with the local storage driver, PUTs report pages straight to /files, so it
+ * is cross-origin on both counts.
+ */
+const defaultDevOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8081',
+  'http://localhost:19006',
+];
 
 /**
  * The first non-internal IPv4 address of this machine.
@@ -174,6 +194,7 @@ const config = {
   isProduction: env.NODE_ENV === 'production',
   isTest: env.NODE_ENV === 'test',
   port: env.PORT,
+  trustProxy: env.TRUST_PROXY,
   /** Surfaced in the OpenAPI document; set by the package manager when it runs a script. */
   version: process.env.npm_package_version ?? '1.0.0',
   mongoose: {

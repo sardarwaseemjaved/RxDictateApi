@@ -39,12 +39,24 @@ export const notify = async (notification: NewNotification): Promise<void> => {
   });
 };
 
-/** Everyone holding a role in this practice, which is who most events concern. */
+/**
+ * Everyone holding a role in this practice, which is who most events concern.
+ *
+ * With a location, a PA is included only when assigned to it - the same rule
+ * resolveLocation holds them to. A doctor works at every location of their
+ * practice and is never filtered out by one.
+ */
 export const membersOf = async (
   practiceId: Types.ObjectId,
-  roles: ('doctor' | 'pa')[] = ['doctor', 'pa'],
+  roles?: ('doctor' | 'pa')[],
+  locationId?: Types.ObjectId,
 ): Promise<Types.ObjectId[]> => {
-  const memberships = await Membership.find({ practiceId, status: 'active', role: { $in: roles } }).select('userId');
+  const memberships = await Membership.find({
+    practiceId,
+    status: 'active',
+    role: { $in: roles ?? ['doctor', 'pa'] },
+    ...(locationId ? { $or: [{ role: 'doctor' }, { locationIds: locationId }] } : {}),
+  }).select('userId');
   return memberships.map((membership) => membership.userId);
 };
 
@@ -53,13 +65,12 @@ export const membersOf = async (
  * be told about something they just did.
  */
 export const notifyPractice = async (
-  notification: Omit<NewNotification, 'userId'> & { roles?: ('doctor' | 'pa')[] },
+  notification: Omit<NewNotification, 'userId'> & { roles?: ('doctor' | 'pa')[]; locationId?: Types.ObjectId },
 ): Promise<void> => {
-  const userIds = await membersOf(notification.practiceId, notification.roles);
+  const { roles, locationId, ...rest } = notification;
+  const userIds = await membersOf(rest.practiceId, roles, locationId);
   await Promise.all(
-    userIds
-      .filter((userId) => !notification.actorId || !userId.equals(notification.actorId))
-      .map((userId) => notify({ ...notification, userId })),
+    userIds.filter((userId) => !rest.actorId || !userId.equals(rest.actorId)).map((userId) => notify({ ...rest, userId })),
   );
 };
 

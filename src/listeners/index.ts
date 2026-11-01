@@ -3,6 +3,7 @@ import { on } from '../core/events';
 import { sendMemberAdded } from '../core/sms';
 import { Practice, User } from '../models';
 import { notify, notifyPractice } from '../services/notification.service';
+import { karachiDay } from '../utils/time';
 
 /**
  * Everything that happens after a write, rather than as part of one.
@@ -62,7 +63,7 @@ on('prescription.revised', async ({ practiceId, prescriptionId, version, actorId
 
 /**
  * The one piece of outbound messaging that matters today: a PA who has just
- * been added has no idea she can sign in until she is told.
+ * been added has no idea they can sign in until somebody says so.
  */
 on('member.added', async ({ practiceId, userId, phone, membershipId, actorId }) => {
   const [practice, addedBy] = await Promise.all([Practice.findById(practiceId), User.findById(actorId)]);
@@ -130,8 +131,8 @@ on('location.archived', async ({ practiceId, locationId, actorId }) => {
 
 /**
  * The doctor is the one who needs to know, and the flagged readings are the
- * reason it is worth telling him rather than leaving it on a screen he may not
- * look at.
+ * reason it is worth telling them rather than leaving it on a screen they may
+ * not look at.
  */
 on('vitals.recorded', async ({ practiceId, visitId, flaggedFields, actorId }) => {
   await notifyPractice({
@@ -148,15 +149,24 @@ on('vitals.recorded', async ({ practiceId, visitId, flaggedFields, actorId }) =>
   });
 });
 
-on('appointment.booked', async ({ practiceId, appointmentId, at, actorId }) => {
+/**
+ * The assistants keep the Schedule, so a booking made at another desk is
+ * theirs to hear about - the ones who work at that location. Not the doctor,
+ * who has no schedule page for it to open, and not whoever made the booking.
+ *
+ * The day is Karachi's: an evening slot is still on the day the patient was
+ * told, not the UTC date after it.
+ */
+on('appointment.booked', async ({ practiceId, locationId, appointmentId, at, actorId }) => {
   await notifyPractice({
     practiceId,
     type: 'appointment.booked',
     refId: appointmentId,
     title: 'Appointment booked',
-    body: `A patient is booked for ${at.toISOString().slice(0, 10)}.`,
+    body: `A patient is booked for ${karachiDay(at)}.`,
     actorId,
-    roles: ['doctor'],
+    roles: ['pa'],
+    locationId,
   });
 });
 

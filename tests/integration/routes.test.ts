@@ -49,13 +49,18 @@ const BUILT: Route[] = [
 
   { method: 'get', path: '/api/v1/notifications' },
   { method: 'post', path: '/api/v1/notifications/read', body: { ids: ['6540000000000000000000aa'] } },
+
+  { method: 'get', path: '/api/v1/templates' },
+  {
+    method: 'post',
+    path: '/api/v1/templates',
+    body: { name: 'Viral fever', sections: { advice: [{ id: 'a', text: 'Fluids' }] } },
+  },
 ];
 
 /** Mounted now, answering 501, so nothing is renamed when they go live. */
 const NOT_IMPLEMENTED: Route[] = [
   { method: 'post', path: '/api/v1/devices', body: { pushToken: 'abc', platform: 'ios' } },
-  { method: 'get', path: '/api/v1/templates' },
-  { method: 'post', path: '/api/v1/templates' },
   { method: 'get', path: '/api/v1/portal/anything' },
 ];
 
@@ -139,6 +144,7 @@ describe('Every route in the product responds', () => {
       .expect(200);
 
     const visit = await request(app).post('/api/v1/visits').set(headers).send({ patientId }).expect(201);
+    await request(app).post(`/api/v1/visits/${visit.body.data.id}/move`).set(headers).send({ before: null }).expect(200);
     await request(app)
       .patch(`/api/v1/visits/${visit.body.data.id}`)
       .set(headers)
@@ -159,10 +165,34 @@ describe('Every route in the product responds', () => {
     await request(app).get(`/api/v1/prescriptions/${id}/pdf`).set(headers).expect(200);
     await request(app).post(`/api/v1/prescriptions/${id}/revise`).set(headers).send({}).expect(201);
 
-    // 501, but mounted and spelled as they will stay.
-    const history = await request(app).get(`/api/v1/patients/${patientId}/history`).set(headersFor(doctor)).expect(501);
-    expect(history.body.error.code).toBe('NOT_IMPLEMENTED');
-    await request(app).post(`/api/v1/prescriptions/from-template/${patientId}`).set(headers).expect(501);
+    const history = await request(app).get(`/api/v1/patients/${patientId}/history`).set(headersFor(doctor)).expect(200);
+    expect(history.body.data.length).toBeGreaterThan(0);
+
+    const template = await request(app)
+      .post('/api/v1/templates')
+      .set(headersFor(doctor))
+      .send({ name: 'Rest', fromPrescriptionId: id })
+      .expect(201);
+    const templateId = template.body.data.id as string;
+    await request(app).get(`/api/v1/templates/${templateId}`).set(headersFor(doctor)).expect(200);
+    await request(app)
+      .patch(`/api/v1/templates/${templateId}`)
+      .set(headersFor(doctor))
+      .send({ name: 'Rest well' })
+      .expect(200);
+    await request(app)
+      .post(`/api/v1/prescriptions/from-template/${templateId}`)
+      .set(headers)
+      .send({ patientId })
+      .expect(200);
+    await request(app).delete(`/api/v1/templates/${templateId}`).set(headersFor(doctor)).expect(200);
+
+    const report = await request(app)
+      .post(`/api/v1/patients/${patientId}/reports`)
+      .set(headersFor(doctor))
+      .send({ type: 'lab', testName: 'CBC', testDate: '2026-10-01', pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`] })
+      .expect(201);
+    await request(app).post(`/api/v1/reports/${report.body.data.id}/review`).set(headersFor(doctor)).expect(200);
   });
 
   test('an unknown path is a 404 in the standard envelope', async () => {

@@ -10,12 +10,13 @@ import { AppError } from '../errors';
  * answer, and a new action cannot be added without appearing here.
  *
  * Location scope is not expressed here because it is not a question of role: a
- * doctor may use any location of his practice and a PA only the ones she was
- * assigned, and resolveLocation enforces that for every location-scoped route.
+ * doctor may use any location of their own practice and a PA only the ones
+ * they were assigned, and resolveLocation enforces that for every
+ * location-scoped route.
  */
 const PERMISSIONS: Record<Action, readonly Role[]> = {
   // The practice and its locations are the doctor's to configure. A PA gets the
-  // locations she works at from /me, so she never needs to list them.
+  // locations they work at from /me, so never needs to list them.
   'practice.read': ['doctor'],
   'practice.update': ['doctor'],
 
@@ -54,11 +55,17 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
 
   'drug.search': ['doctor'],
 
+  // A template is one doctor's prescribing habit, kept for that doctor.
   'template.read': ['doctor'],
   'template.create': ['doctor'],
+  'template.update': ['doctor'],
+  'template.delete': ['doctor'],
 
+  // The PA files a report; saying it has been looked at is the doctor's call,
+  // because that is what takes it off the "new reports" list.
   'report.create': ['doctor', 'pa'],
   'report.read': ['doctor', 'pa'],
+  'report.review': ['doctor'],
 
   'appointment.read': ['doctor', 'pa'],
   'appointment.create': ['doctor', 'pa'],

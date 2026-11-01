@@ -3,7 +3,6 @@ import { prescriptionController, voiceController } from '../../controllers';
 import { prescriptionValidation, voiceValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
-import notImplemented from '../../middlewares/notImplemented';
 import { resolveLocation, resolvePractice } from '../../core/tenancy';
 import { requireCan } from '../../core/permissions';
 
@@ -29,15 +28,20 @@ router.post(
   prescriptionController.createPrescription,
 );
 
-/** Started from a template. Not built yet; the path is. */
+/**
+ * Start a prescription from one of the doctor's own templates (`:id` is the
+ * template). When the visit already has an open draft, the template's lines are
+ * added to it instead and nothing already there is removed: 200 for that, 201
+ * for a new draft.
+ */
 router.post(
   '/from-template/:id',
   requireAuth,
   resolvePractice,
   resolveLocation,
   requireCan('prescription.create'),
-  validate(prescriptionValidation.getPrescription),
-  notImplemented('Starting a prescription from a template'),
+  validate(prescriptionValidation.createFromTemplate),
+  prescriptionController.createFromTemplate,
 );
 
 router.get(

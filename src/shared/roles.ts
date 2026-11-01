@@ -54,9 +54,12 @@ export const ACTIONS = [
 
   'template.read',
   'template.create',
+  'template.update',
+  'template.delete',
 
   'report.create',
   'report.read',
+  'report.review',
 
   'appointment.read',
   'appointment.create',

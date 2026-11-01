@@ -13,7 +13,12 @@ import {
 } from '../shared/prescription.schema';
 import { newItemId } from '../utils/ids';
 
-export type OpOrigin = 'typed' | 'voice';
+/**
+ * Who a batch came from. `template` is lines copied in from a saved template:
+ * validated and applied like any other op, but neither a correction for the
+ * edit log nor something said, so it marks nothing.
+ */
+export type OpOrigin = 'typed' | 'voice' | 'template';
 
 export interface ApplyOpsResult {
   sections: PrescriptionSections;
@@ -188,10 +193,10 @@ export const validateOps = (current: PrescriptionSections, ops: Op[]): Normalize
  * Pure: it takes the sections, not the document, so the caller decides when to
  * save and this can be unit tested without a database.
  *
- * `origin` is the only thing the two callers differ on. A typed change is the
+ * `origin` is the only thing the callers differ on. A typed change is the
  * doctor correcting something and goes into the edit log; a dictated change
  * marks the line `correctedBySpeech` instead, so the two are told apart when
- * accuracy is measured later.
+ * accuracy is measured later. A template's lines do neither.
  */
 export const applyOps = (
   current: PrescriptionSections,
@@ -246,8 +251,8 @@ export const applyOps = (
         // The doctor dictated a correction over this line.
         updated.correctedBySpeech = true;
       } else {
-        // He has looked at it and typed, so whatever the pipeline was unsure
-        // about is settled.
+        // The doctor has looked at it and typed, so whatever the pipeline was
+        // unsure about is settled.
         updated.flags = [];
       }
     }

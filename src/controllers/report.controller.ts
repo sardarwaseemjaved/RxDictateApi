@@ -25,3 +25,7 @@ export const listReports = catchAsync(async (req, res) => {
 export const getReport = catchAsync(async (req, res) => {
   sendData(res, await reportService.getReport(scopeFrom(req), req.params.id));
 });
+
+export const reviewReport = catchAsync(async (req, res) => {
+  sendData(res, await reportService.reviewReport(scopeFrom(req), req.params.id));
+});

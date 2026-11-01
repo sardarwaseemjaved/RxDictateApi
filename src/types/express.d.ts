@@ -26,7 +26,10 @@ declare global {
        * route has to remember to.
        */
       allowedLocationIds: Types.ObjectId[] | 'all';
-      /** Set by resolveLocation from X-Location-Id, on location-scoped routes only. */
+      /**
+       * Set from X-Location-Id: by resolveLocation on location-scoped routes,
+       * and by resolveLocationIfSent where the header is welcome but optional.
+       */
       locationId?: Types.ObjectId;
     }
 

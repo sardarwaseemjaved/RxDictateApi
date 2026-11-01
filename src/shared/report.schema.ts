@@ -34,7 +34,12 @@ export const createUploadBodySchema = z.object({
 export type CreateUploadBody = z.infer<typeof createUploadBodySchema>;
 
 export const uploadTicketSchema = z.object({
-  /** PUT the bytes here, with the same Content-Type that was asked for. */
+  /**
+   * PUT the bytes here, with the same Content-Type that was asked for and no
+   * more than the size that was asked for. With S3 or R2 this is the bucket;
+   * on a dev box it is this API's /files route. Either way, no Authorization
+   * header: the URL is the credential.
+   */
   uploadUrl: z.string(),
   /** Hand this back in pageKeys once the PUT succeeds. */
   fileKey: z.string(),
@@ -62,8 +67,10 @@ export const reportViewSchema = z.object({
   /** How many pages, not the pages themselves. */
   pages: z.number().int().min(1),
   uploadedBy: objectIdSchema,
-  /** Null until the doctor has looked at it. */
+  /** Null until the doctor has looked at it. Set once, by POST /reports/:id/review. */
   reviewedAt: z.coerce.date().nullable(),
+  /** Who marked it reviewed; null alongside reviewedAt. */
+  reviewedBy: objectIdSchema.nullable(),
   createdAt: z.coerce.date(),
 });
 export type ReportView = z.infer<typeof reportViewSchema>;

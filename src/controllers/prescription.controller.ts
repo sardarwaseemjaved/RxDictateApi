@@ -4,6 +4,7 @@ import catchAsync from '../utils/catchAsync';
 import { parsedQuery } from '../utils/request';
 import { sendCreated, sendData } from '../utils/response';
 import type {
+  CreateFromTemplateBody,
   CreatePrescriptionBody,
   ListPrescriptionsQuery,
   PatchPrescriptionBody,
@@ -28,6 +29,20 @@ export const createPrescription = catchAsync(async (req, res) => {
     req.body as CreatePrescriptionBody,
   );
   // 201 for a draft this call made, 200 for the one that was already open.
+  if (created) {
+    sendCreated(res, prescription);
+  } else {
+    sendData(res, prescription);
+  }
+});
+
+export const createFromTemplate = catchAsync(async (req, res) => {
+  const { prescription, created } = await prescriptionService.createFromTemplate(
+    scopeFrom(req),
+    req.params.id,
+    req.body as CreateFromTemplateBody,
+  );
+  // 201 for a new draft, 200 when the template was added to the open one.
   if (created) {
     sendCreated(res, prescription);
   } else {
