@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { Membership, Notification, type INotification, type NotificationDoc } from '../models';
 import { BaseRepository, type Scope } from '../core/db';
+import { emit } from '../core/events';
 import type {
   ListNotificationsQuery,
   MarkNotificationsReadBody,
@@ -22,12 +23,7 @@ export interface NewNotification {
   actorId?: Types.ObjectId | null;
 }
 
-/**
- * Written now, read by nothing yet. Only listeners call this: a service that
- * wrote a notification directly would be a service that has to be edited when
- * push notifications arrive.
- */
-export const notify = async (notification: NewNotification): Promise<void> => {
+const write = async (notification: NewNotification): Promise<void> => {
   await Notification.create({
     practiceId: notification.practiceId,
     userId: notification.userId,
@@ -37,6 +33,16 @@ export const notify = async (notification: NewNotification): Promise<void> => {
     body: notification.body,
     createdBy: notification.actorId ?? null,
   });
+};
+
+/**
+ * Into one person's inbox. Only listeners call this: a service that wrote a
+ * notification directly would be a service that has to be edited when push
+ * notifications arrive.
+ */
+export const notify = async (notification: NewNotification): Promise<void> => {
+  await write(notification);
+  emit('notification.created', { practiceId: notification.practiceId, userIds: [notification.userId] });
 };
 
 /**
@@ -68,10 +74,14 @@ export const notifyPractice = async (
   notification: Omit<NewNotification, 'userId'> & { roles?: ('doctor' | 'pa')[]; locationId?: Types.ObjectId },
 ): Promise<void> => {
   const { roles, locationId, ...rest } = notification;
-  const userIds = await membersOf(rest.practiceId, roles, locationId);
-  await Promise.all(
-    userIds.filter((userId) => !rest.actorId || !userId.equals(rest.actorId)).map((userId) => notify({ ...rest, userId })),
-  );
+  const members = await membersOf(rest.practiceId, roles, locationId);
+  const userIds = members.filter((userId) => !rest.actorId || !userId.equals(rest.actorId));
+  if (userIds.length === 0) {
+    return;
+  }
+
+  await Promise.all(userIds.map((userId) => write({ ...rest, userId })));
+  emit('notification.created', { practiceId: rest.practiceId, userIds });
 };
 
 const toNotificationView = (notification: NotificationDoc): NotificationView => ({
@@ -129,6 +139,9 @@ export const markRead = async (scope: Scope, body: MarkNotificationsReadBody): P
     }),
     { $set: { readAt: new Date() } },
   );
+  if (result.modifiedCount > 0) {
+    emit('notification.read', { practiceId: scope.practiceId, userId: scope.actorId });
+  }
 
   const unread = await notifications.count(scope, { userId: scope.actorId, readAt: null });
   return { read: result.modifiedCount, unread };

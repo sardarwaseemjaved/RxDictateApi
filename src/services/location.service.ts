@@ -81,6 +81,7 @@ export const updateLocation = async (scope: Scope, id: string, patch: UpdateLoca
     before,
     after,
   });
+  emit('location.updated', { practiceId: scope.practiceId, locationId: location._id, actorId: scope.actorId });
 
   // An address change must not reach a prescription that has already been
   // printed; that is what the letterhead snapshot on an approved prescription

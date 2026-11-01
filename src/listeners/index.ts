@@ -4,6 +4,8 @@ import { sendMemberAdded } from '../core/sms';
 import { Practice, User } from '../models';
 import { notify, notifyPractice } from '../services/notification.service';
 import { karachiDay } from '../utils/time';
+// What each write tells the open apps over the realtime socket. Imported for the side effect.
+import './realtime';
 
 /**
  * Everything that happens after a write, rather than as part of one.
@@ -195,10 +197,7 @@ on('voice.segmentFailed', async ({ practiceId, prescriptionId, doctorId, seq, er
   });
 });
 
-/**
- * Nothing acts on this yet. It is the seam live updates will hang off: when
- * there is an open connection per session, this is where it gets told to close.
- */
+/** The realtime listener closes this session's sockets; this only records it. */
 on('session.revoked', ({ sessionId, reason }) => {
   logger.debug(`session ${String(sessionId)} revoked: ${reason}`);
 });

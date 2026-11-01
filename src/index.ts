@@ -8,8 +8,10 @@ import { sweepExpiredAudio, sweepStalledSegments } from './services/voice.servic
 import { markExpiredSessions } from './services/session.service';
 import { backfillQueuePositions } from './services/visit.service';
 import { backfillPatientLocations } from './services/patient.service';
+import { attachRealtime, type RealtimeServer } from './core/realtime';
 
 let server: Server | undefined;
+let realtime: RealtimeServer | undefined;
 
 /**
  * Two housekeeping jobs, on plain timers.
@@ -75,11 +77,22 @@ const start = async (): Promise<void> => {
   server = app.listen(config.port, () => {
     logger.info(`Listening to port ${config.port}`);
   });
+  // Live updates on the same port, at REALTIME_PATH.
+  realtime = attachRealtime(server);
 
   startSweeps();
 };
 
+/**
+ * Open sockets are closed before the HTTP server, which would otherwise wait
+ * on them forever: a WebSocket is a connection that never finishes by itself.
+ */
+const closeRealtime = (): void => {
+  realtime?.close().catch((error: Error) => logger.error(`closing realtime failed: ${error.message}`));
+};
+
 const exitHandler = () => {
+  closeRealtime();
   if (server) {
     server.close(() => {
       logger.info('Server closed');
@@ -100,6 +113,7 @@ process.on('unhandledRejection', unexpectedErrorHandler);
 
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received');
+  closeRealtime();
   if (server) {
     server.close();
   }

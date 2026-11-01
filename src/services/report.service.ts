@@ -160,6 +160,12 @@ export const reviewReport = async (scope: Scope, id: string): Promise<ReportView
     before: { reviewedAt: null },
     after: { reviewedAt: after.reviewedAt, reviewedBy: after.reviewedBy },
   });
+  emit('report.reviewed', {
+    practiceId: scope.practiceId,
+    patientId: reviewed.patientId,
+    reportId: reviewed._id,
+    actorId: scope.actorId,
+  });
 
   return after;
 };

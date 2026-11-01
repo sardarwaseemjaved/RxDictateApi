@@ -149,6 +149,7 @@ src/
     permissions/   can(role, action) - one table
     errors/        AppError and the fixed error-code enum
     events/        a typed EventEmitter bus
+    realtime/      the WebSocket: handshake, open connections, deliver()
     audit/         the append-only write log
     storage/       S3/R2 and local drivers, signed URLs
     sms/           provider adapter
@@ -159,7 +160,7 @@ src/
   routes/v1/       every route, with its middleware chain spelled out
   validations/     request wiring: shared schemas assembled per route
   middlewares/     requestId, requireAuth, validate, rateLimiter, error, notImplemented
-  listeners/       what an event causes - notifications, SMS
+  listeners/       what an event causes - notifications, SMS, realtime messages
   utils/
 tests/
   integration/     through the app, over HTTP
@@ -621,7 +622,8 @@ measured over real use.
 One segment of audio at a time, base64 inside the JSON body, with `seq` strictly
 one more than the last: an upload that skips ahead is refused rather than quietly
 reordered, because the ops of segment 3 can refer to a line segment 2 was about to
-add. Transcription runs in process and the app polls
+add. Transcription runs in process; the doctor's app hears `voice` on the
+realtime socket when a segment is applied or fails, and reads
 `GET /prescriptions/:id/voice`.
 
 ```
@@ -707,21 +709,120 @@ does not.
 
 ## Events
 
-`patient.added`, `visit.statusChanged`, `voice.segmentApplied`,
+`patient.added`, `patient.updated`, `visit.added`, `visit.moved`,
+`visit.statusChanged`, `vitals.recorded`, `voice.segmentApplied`,
 `voice.segmentFailed`, `prescription.approved`, `prescription.revised`,
-`member.added`, `member.removed`, `member.locationsChanged`, `location.added`,
-`location.archived`, `report.uploaded`.
+`appointment.booked`, `appointment.cancelled`, `appointment.arrived`,
+`member.added`, `member.removed`, `member.locationsChanged`,
+`member.roleChanged`, `location.added`, `location.updated`,
+`location.archived`, `report.uploaded`, `report.reviewed`,
+`notification.created`, `notification.read`, `session.revoked`.
 
 Services emit; [src/listeners](src/listeners) decides what they cause. No service
-calls notification or SMS code directly, so adding push later means adding a
-handler and editing no prescription code.
+calls notification, SMS or realtime code directly, so adding push later means
+adding a handler and editing no prescription code. Some events exist only for
+the realtime listener and cause no notification.
+
+## Realtime
+
+One WebSocket per open app, on the API's own port at `/api/v1/realtime`
+(`REALTIME_PATH`). It replaces polling. The server says **that** something
+changed, never what it changed to: `{ type: 'changed', topic, id? }`. The app
+refetches through the ordinary routes, so permissions and who-sees-which-patient
+are decided there and nowhere else, and no name, phone or medical detail ever
+crosses the socket. There is no polling behind it: the app refetches everything
+it shows on every connect and reconnect. The contract is
+[src/shared/realtime.schema.ts](src/shared/realtime.schema.ts).
+
+**The handshake.**
+
+1. Connect to `wss://<api host>/api/v1/realtime`. Nothing goes in the URL; a
+   token in the query string is never read.
+2. Within `REALTIME_AUTH_TIMEOUT_MS` (10 s), send
+   `{ type: 'auth', token, practiceId, locationId }`: the access token, and the
+   ids the app sends as `X-Practice-Id` and `X-Location-Id`. Otherwise the
+   server sends `UNAUTHENTICATED` and closes.
+3. The server runs the checks a request to a location-scoped route gets
+   (`authenticate`, `practiceContextFor`, `checkLocation`, the same functions
+   the middleware calls). On success it sends `{ type: 'ready' }` and nothing
+   is sent before that. On failure it sends `{ type: 'error', code, message }`
+   with the code the HTTP request would have answered, then closes.
+4. After every token refresh, send `auth` again on the same socket with the new
+   token. It must be the same person, session, clinic and location, and it moves
+   the expiry on; there is no reply. A different clinic or location is
+   `VALIDATION_ERROR` and a close: open a new connection. A token that runs out
+   with no fresh one is `TOKEN_EXPIRED` and a close: refresh, then reconnect.
+5. `{ type: 'heartbeat' }` arrives every `REALTIME_HEARTBEAT_MS` (25 s). Fifty
+   seconds of silence means the connection is dead: close it and reconnect.
+   The server also pings at the protocol level and terminates a socket that
+   misses two pongs.
+
+Anything the app sends that is not a valid `auth` is ignored. A frame over 4 KB
+closes the socket. A browser's `Origin` must be one `CORS_ORIGINS` allows; the
+mobile app sends none and is let through, as on the HTTP API.
+
+**Topics.** Whoever made the change hears it too: they may have the app open on
+another device.
+
+| Topic           | Sent when                                                                                               | Sent to                                                                                             | `id`           |
+| --------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------- |
+| `visits`        | a visit is added to the day (by hand or by starting a prescription), changes status, moves in the order | sockets on that visit's location                                                                    | visitId        |
+| `vitals`        | vitals recorded                                                                                         | sockets on that visit's location                                                                    | visitId        |
+| `prescriptions` | approved, revised                                                                                       | sockets on the prescription's location                                                              | prescriptionId |
+| `appointments`  | booked, cancelled, or marked arrived because the patient was added to that day's list                   | sockets on the appointment's location                                                               | appointmentId  |
+| `patients`      | a patient is added or edited                                                                            | doctors, and assistants at a location the patient is linked to (`canSeePatient` in patient.service) | patientId      |
+| `reports`       | uploaded, reviewed (the first look only)                                                                | as `patients`, for the report's patient                                                             | reportId       |
+| `notifications` | one is written to this person's inbox, or theirs are marked read on any device                          | that person, in that clinic                                                                         | none           |
+| `team`          | a member is added or removed, or their locations or role change                                         | everyone in the clinic                                                                              | membershipId   |
+| `locations`     | a location is added, edited or archived                                                                 | everyone in the clinic                                                                              | locationId     |
+| `voice`         | a dictation segment is applied or fails                                                                 | the prescription's doctor                                                                           | prescriptionId |
+
+A patient found by their whole phone number (the 30-minute introduction in
+patient.service) does not make anyone hear about them; links do.
+
+**Close codes.** Every close the server starts for a reason comes after an
+`error` message, with WebSocket close code 1008 and the error code as the close
+reason.
+
+| `error.code`                         | When                                                                    | What the app does                       |
+| ------------------------------------ | ----------------------------------------------------------------------- | --------------------------------------- |
+| `UNAUTHENTICATED`                    | no `auth` within 10 s                                                   | reconnect and send `auth` straight away |
+| `TOKEN_INVALID`                      | a token that is not ours, or a later `auth` for a different sign-in     | sign out locally                        |
+| `TOKEN_EXPIRED`                      | at sign-in, or when the token runs out with no fresh `auth`             | refresh, then reconnect                 |
+| `SESSION_REVOKED`, `SESSION_EXPIRED` | signed out on this device or from another, or the session ended         | sign out locally                        |
+| `NOT_MEMBER`, `MEMBERSHIP_REMOVED`   | not, or no longer, a member of this clinic                              | leave the clinic                        |
+| `LOCATION_NOT_ALLOWED`               | not, or no longer, working at this location (locations or role changed) | choose another location                 |
+| `LOCATION_ARCHIVED`                  | the location was archived                                               | choose another location                 |
+| `VALIDATION_ERROR`                   | a later `auth` named a different clinic or location                     | open a new connection                   |
+| `INTERNAL`                           | the checks could not run                                                | reconnect with backoff                  |
+
+A close with no `error` before it - 1001 when the server restarts, 1006 when
+the line dropped or a dead socket was terminated - means reconnect with backoff,
+then refetch.
+
+**Inside.** [src/core/realtime](src/core/realtime) holds the upgrade and the
+heartbeat (`server.ts`), the handshake (`handshake.ts`), the open connections
+by location, user, session and clinic (`registry.ts`), and `deliver()`
+(`deliver.ts`). [src/listeners/realtime.ts](src/listeners/realtime.ts) turns
+each event into a delivery. Services emit and know nothing about sockets.
+
+**Past one process.** Today there is one process (`instances: 1` in
+`ecosystem.config.json`), so the connections live in memory. Everything a
+write causes goes through `deliver()`, and a delivery is plain data: ids as
+strings, and an audience described rather than resolved. To run several
+processes, `deliver()` publishes each delivery to a Redis channel instead,
+every process subscribes and calls `deliverHere()` on its own connections, and
+nothing else changes: no listener, no service, no registry. nginx can spread
+sockets across processes freely, because a socket only ever talks to the
+process holding it. The session cache in session.service is the other
+in-process state to move at the same time.
 
 ## Deliberately not built yet
 
-- **No queue and no SSE.** Transcription, extraction and PDF rendering run in
-  process and the app polls. Both are worth adding when load asks for them, and
-  the housekeeping sweeps in [src/index.ts](src/index.ts) are plain timers for the
-  same reason.
+- **No queue.** Transcription, extraction and PDF rendering run in process,
+  and the app hears about a finished segment over the realtime socket. A queue
+  is worth adding when load asks for it, and the housekeeping sweeps in
+  [src/index.ts](src/index.ts) are plain timers for the same reason.
 - **No formulary import.** `drugs` starts empty and grows from use: a medicine
   nobody has prescribed before is inserted, and the next time it matches. A
   doctor's working repertoire is 200-400 drugs, so a text index with a prefix
@@ -742,24 +843,27 @@ No local mongod, no CI service container.
 
 The suites that exist to hold the six rules down:
 
-| File                                                                                       | What it proves                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                          |
-| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                             |
-| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                         |
-| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                                                                                 |
-| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                       |
-| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                                                                              |
-| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                           |
-| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)               | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                        |
-| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)   | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill |
-| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                     |
-| [tests/integration/history.test.ts](tests/integration/history.test.ts)                     | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                               |
-| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                 | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                      |
-| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)   | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                      |
-| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                  |
-| [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited |
-| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                               |
-| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                                                                                       |
-| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                                                                                                 |
+| File                                                                                       | What it proves                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                                                                 |
+| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                                                                    |
+| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                                                                |
+| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                                                                                                                        |
+| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                                                              |
+| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                                                                                                                     |
+| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                                                                  |
+| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)               | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                                                               |
+| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)   | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill                                        |
+| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                                                            |
+| [tests/integration/history.test.ts](tests/integration/history.test.ts)                     | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                                                                      |
+| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                 | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                                                             |
+| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)   | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                                                             |
+| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                                                         |
+| [tests/integration/realtime.test.ts](tests/integration/realtime.test.ts)                   | the realtime socket: every sign-in failure gives the HTTP code and closes; a fresh token keeps it open; who hears which topic; every row of the topics table sends exactly one message; lost access closes the right sockets; no message carries a name, phone or medical field |
+| [tests/integration/realtimeTimers.test.ts](tests/integration/realtimeTimers.test.ts)       | under fake timers: an unsigned socket is closed after 10 s, the heartbeat goes out every 25 s, and a socket that stops answering pings is terminated                                                                                                                            |
+| [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited                                        |
+| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                                                                      |
+| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                                                                                                                              |
+| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                                                                                                                                        |
+
 # RxDictateApi

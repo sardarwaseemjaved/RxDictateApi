@@ -226,6 +226,10 @@ Copy the site config from the Mac:
 scp deploy/nginx/clinic-api.conf ubuntu@<server-ip>:/tmp/
 ```
 
+The config also passes the apps' live-updates WebSocket (`/api/v1/realtime`)
+through to the API. A server set up before that existed needs this file copied
+over again and nginx reloaded, or the apps cannot connect.
+
 Then, on the server, set your domain name in the config and enable it:
 
 ```sh

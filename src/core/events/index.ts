@@ -7,12 +7,29 @@ import type { VisitStatus } from '../../shared/visit.schema';
 /**
  * What happened, as past tense facts.
  *
- * Services emit; listeners act. Notification code, SMS and push are never
- * called from a service, so adding push later means adding a listener rather
- * than editing prescription code.
+ * Services emit; listeners act. Notification code, SMS, push and the realtime
+ * socket are never called from a service, so adding push later means adding a
+ * listener rather than editing prescription code. Some events exist only for
+ * the realtime listener and cause no notification at all.
  */
 export interface EventPayloads {
   'patient.added': { practiceId: Types.ObjectId; patientId: Types.ObjectId; actorId: Types.ObjectId };
+  'patient.updated': { practiceId: Types.ObjectId; patientId: Types.ObjectId; actorId: Types.ObjectId };
+  /** On a day's list, by hand or by starting a prescription. Not on a double tap that finds them already there. */
+  'visit.added': {
+    practiceId: Types.ObjectId;
+    locationId: Types.ObjectId;
+    visitId: Types.ObjectId;
+    patientId: Types.ObjectId;
+    actorId: Types.ObjectId;
+  };
+  /** Put somewhere else in the order. Others on the list may have been renumbered with it. */
+  'visit.moved': {
+    practiceId: Types.ObjectId;
+    locationId: Types.ObjectId;
+    visitId: Types.ObjectId;
+    actorId: Types.ObjectId;
+  };
   'visit.statusChanged': {
     practiceId: Types.ObjectId;
     locationId: Types.ObjectId;
@@ -73,7 +90,17 @@ export interface EventPayloads {
     locationIds: Types.ObjectId[];
     actorId: Types.ObjectId;
   };
+  /** A doctor made a PA or the other way round, which changes which locations and patients they reach. */
+  'member.roleChanged': {
+    practiceId: Types.ObjectId;
+    membershipId: Types.ObjectId;
+    userId: Types.ObjectId;
+    role: Role;
+    locationIds: Types.ObjectId[];
+    actorId: Types.ObjectId;
+  };
   'location.added': { practiceId: Types.ObjectId; locationId: Types.ObjectId; actorId: Types.ObjectId };
+  'location.updated': { practiceId: Types.ObjectId; locationId: Types.ObjectId; actorId: Types.ObjectId };
   'location.archived': { practiceId: Types.ObjectId; locationId: Types.ObjectId; actorId: Types.ObjectId };
   'vitals.recorded': {
     practiceId: Types.ObjectId;
@@ -98,6 +125,14 @@ export interface EventPayloads {
     appointmentId: Types.ObjectId;
     actorId: Types.ObjectId;
   };
+  /** The patient came: putting them on that day's list marks their booking kept. */
+  'appointment.arrived': {
+    practiceId: Types.ObjectId;
+    locationId: Types.ObjectId;
+    appointmentId: Types.ObjectId;
+    visitId: Types.ObjectId;
+    actorId: Types.ObjectId;
+  };
   'session.revoked': {
     userId: Types.ObjectId;
     sessionId: Types.ObjectId;
@@ -109,6 +144,17 @@ export interface EventPayloads {
     reportId: Types.ObjectId;
     actorId: Types.ObjectId;
   };
+  /** Marked seen. Only the first look: reviewing again changes nothing and says nothing. */
+  'report.reviewed': {
+    practiceId: Types.ObjectId;
+    patientId: Types.ObjectId;
+    reportId: Types.ObjectId;
+    actorId: Types.ObjectId;
+  };
+  /** Written to these people's inboxes. One event for a fan-out, not one per person. */
+  'notification.created': { practiceId: Types.ObjectId; userIds: Types.ObjectId[] };
+  /** Some of this person's notifications were marked read, which moves their badge on every device. */
+  'notification.read': { practiceId: Types.ObjectId; userId: Types.ObjectId };
 }
 
 export type EventName = keyof EventPayloads;

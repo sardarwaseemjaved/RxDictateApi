@@ -29,3 +29,4 @@ export * from './template.schema';
 export * from './voice.schema';
 export * from './drug.schema';
 export * from './notification.schema';
+export * from './realtime.schema';

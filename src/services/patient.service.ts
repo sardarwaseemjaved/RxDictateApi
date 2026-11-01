@@ -57,10 +57,16 @@ export const INTRODUCTION_MS = 30 * 60 * 1000;
 export const visiblePatients = (scope: Scope): Record<string, unknown> =>
   scope.allowedLocationIds === 'all' ? {} : { locationIds: { $in: scope.allowedLocationIds } };
 
-const isLinked = (scope: Scope, patient: PatientDoc): boolean => {
-  const allowed = scope.allowedLocationIds;
-  return allowed === 'all' || patient.locationIds.some((id) => allowed.some((mine) => mine.equals(id)));
-};
+/**
+ * The rule itself, on its own: a member reaching every location sees every
+ * patient, and anyone else sees the ones linked to a location of theirs. Also
+ * decides who hears about a patient over the realtime socket.
+ */
+export const canSeePatient = (allowed: Types.ObjectId[] | 'all', linkedTo: Types.ObjectId[]): boolean =>
+  allowed === 'all' || linkedTo.some((id) => allowed.some((mine) => mine.equals(id)));
+
+const isLinked = (scope: Scope, patient: PatientDoc): boolean =>
+  canSeePatient(scope.allowedLocationIds, patient.locationIds);
 
 /** Found by this member, by their whole phone number, within the last INTRODUCTION_MS. */
 const wasIntroduced = async (scope: Scope, patientId: Types.ObjectId): Promise<boolean> =>
@@ -428,6 +434,7 @@ export const updatePatient = async (scope: Scope, id: string, patch: UpdatePatie
   const after = toPatientView(patient);
 
   await writeAudit(scope, { action: 'patient.update', entity: 'patient', entityId: patient._id, before, after });
+  emit('patient.updated', { practiceId: scope.practiceId, patientId: patient._id, actorId: scope.actorId });
   return after;
 };
 
@@ -521,6 +528,7 @@ export default {
   toPatientSummary,
   patientMatch,
   visiblePatients,
+  canSeePatient,
   findPatient,
   findPatientOrFail,
   linkPatient,

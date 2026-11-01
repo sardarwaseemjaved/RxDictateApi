@@ -112,6 +112,13 @@ const markArrived = async (scope: Scope, visit: VisitDoc): Promise<void> => {
           before: { status: 'booked' },
           after: { status: 'arrived', visitId: String(visit._id) },
         });
+        emit('appointment.arrived', {
+          practiceId: scope.practiceId,
+          locationId: arrived.locationId,
+          appointmentId: arrived._id,
+          visitId: visit._id,
+          actorId: scope.actorId,
+        });
       }
     }),
   );
@@ -181,6 +188,13 @@ export const ensureVisit = async (
     entityId: visit._id,
     after: toVisitView(visit, patient),
   });
+  emit('visit.added', {
+    practiceId: scope.practiceId,
+    locationId: visit.locationId,
+    visitId: visit._id,
+    patientId: patient._id,
+    actorId: scope.actorId,
+  });
 
   await markArrived(scope, visit);
 
@@ -238,6 +252,7 @@ export const createVisit = async (scope: Scope, body: CreateVisitBody): Promise<
   return toVisitView(visit, patient);
 };
 
+/** A visit's status is the only edit it takes, so changeVisitStatus is what announces it. */
 export const updateVisit = async (scope: Scope, id: string, patch: UpdateVisitBody): Promise<VisitView> => {
   const found = await visits.findByIdOrFail(scope, id, 'Visit');
   const visit = await changeVisitStatus(scope, found, patch.status);
@@ -451,6 +466,12 @@ export const moveVisit = async (scope: Scope, id: string, body: MoveVisitBody): 
       locationId: visit.locationId,
       before: { queuePosition: moved.from },
       after: { queuePosition: moved.visit.queuePosition, movedBefore: body.before },
+    });
+    emit('visit.moved', {
+      practiceId: scope.practiceId,
+      locationId: visit.locationId,
+      visitId: visit._id,
+      actorId: scope.actorId,
     });
   }
 

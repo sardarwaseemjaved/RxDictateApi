@@ -3,6 +3,7 @@ import type { Request, RequestHandler } from 'express';
 import { Location, Membership, Practice } from '../../models';
 import { AppError } from '../errors';
 import catchAsync from '../../utils/catchAsync';
+import type { Role } from '../../shared/roles';
 import type { Scope } from '../db';
 
 const PRACTICE_HEADER = 'x-practice-id';
@@ -16,30 +17,30 @@ const asObjectId = (value: string, header: string): Types.ObjectId => {
 };
 
 /**
- * Which practice this request is about, from X-Practice-Id.
- *
- * Required on everything except /auth and /me. Membership is looked up on every
- * request rather than carried in the token, so removing a PA takes effect
- * immediately instead of whenever her access token happens to expire.
+ * Which locations a member may use: any location of their own practice for a
+ * doctor, and for a PA the ones they were assigned.
  */
-export const resolvePractice: RequestHandler = catchAsync(async (req, _res, next) => {
-  if (!req.auth) {
-    throw new AppError('UNAUTHENTICATED', 'Please authenticate');
-  }
+export const allowedLocationsFor = (role: Role, locationIds: Types.ObjectId[]): Types.ObjectId[] | 'all' =>
+  role === 'doctor' ? 'all' : locationIds;
 
-  const header = req.get(PRACTICE_HEADER);
-  if (!header) {
-    throw new AppError('PRACTICE_REQUIRED', 'X-Practice-Id is required');
-  }
-  const practiceId = asObjectId(header, 'X-Practice-Id');
+/**
+ * What this person may do in this practice, with every check resolvePractice
+ * makes and no Express: the realtime handshake runs exactly these.
+ *
+ * Membership is looked up every time rather than carried in the token, so
+ * removing a PA takes effect immediately instead of whenever their access
+ * token happens to expire.
+ */
+export const practiceContextFor = async (userId: Types.ObjectId, practiceText: string): Promise<Express.PracticeContext> => {
+  const practiceId = asObjectId(practiceText, 'X-Practice-Id');
 
-  const membership = await Membership.findOne({ practiceId, userId: req.auth.userId });
+  const membership = await Membership.findOne({ practiceId, userId });
 
   /**
    * Removed and never a member are different facts and the app says different
    * things about them: one is "you were taken off this clinic", the other is
-   * "this is not your clinic". Her sign-in itself is still good - she may work
-   * at another clinic - so this is a 403 about one practice and not a 401.
+   * "this is not your clinic". Their sign-in itself is still good - they may
+   * work at another clinic - so this is a 403 about one practice and not a 401.
    */
   if (membership?.status === 'removed') {
     throw new AppError('MEMBERSHIP_REMOVED', 'You have been removed from this clinic.');
@@ -53,21 +54,38 @@ export const resolvePractice: RequestHandler = catchAsync(async (req, _res, next
     throw AppError.notFound('Clinic');
   }
 
-  req.ctx = {
+  return {
     practiceId,
     membershipId: membership._id,
-    actorId: req.auth.userId,
+    actorId: userId,
     role: membership.role,
-    // A doctor may work at any location of his own practice; a PA is held to
-    // the ones she was assigned.
-    allowedLocationIds: membership.role === 'doctor' ? 'all' : membership.locationIds,
+    allowedLocationIds: allowedLocationsFor(membership.role, membership.locationIds),
   };
+};
 
+/**
+ * Which practice this request is about, from X-Practice-Id. Required on
+ * everything except /auth and /me.
+ */
+export const resolvePractice: RequestHandler = catchAsync(async (req, _res, next) => {
+  if (!req.auth) {
+    throw new AppError('UNAUTHENTICATED', 'Please authenticate');
+  }
+
+  const header = req.get(PRACTICE_HEADER);
+  if (!header) {
+    throw new AppError('PRACTICE_REQUIRED', 'X-Practice-Id is required');
+  }
+
+  req.ctx = await practiceContextFor(req.auth.userId, header);
   next();
 });
 
-/** The location a header names if this caller may use it, or why they may not. */
-const checkLocation = async (ctx: Express.PracticeContext, header: string): Promise<Types.ObjectId | AppError> => {
+/**
+ * The location an id names if this caller may use it, or why they may not.
+ * Shared by the middleware below and the realtime handshake.
+ */
+export const checkLocation = async (ctx: Express.PracticeContext, header: string): Promise<Types.ObjectId | AppError> => {
   if (!Types.ObjectId.isValid(header)) {
     return new AppError('VALIDATION_ERROR', 'X-Location-Id is not a valid id');
   }
@@ -168,4 +186,13 @@ export const locationFrom = (req: Request): Types.ObjectId => {
   return locationId;
 };
 
-export default { resolvePractice, resolveLocation, resolveLocationIfSent, scopeFrom, locationFrom };
+export default {
+  allowedLocationsFor,
+  practiceContextFor,
+  checkLocation,
+  resolvePractice,
+  resolveLocation,
+  resolveLocationIfSent,
+  scopeFrom,
+  locationFrom,
+};

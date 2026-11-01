@@ -13,6 +13,8 @@ interface AccessClaims {
   sub: string;
   sid: string;
   type: 'access';
+  /** Set by jsonwebtoken from expiresIn, in seconds. */
+  exp?: number;
 }
 
 export interface AccessToken {
@@ -23,13 +25,15 @@ export interface AccessToken {
 export interface VerifiedAccess {
   userId: string;
   sessionId: string;
+  /** When this token stops working. A live connection is closed at this moment unless a fresh one arrives. */
+  expiresAt: Date;
 }
 
 /**
  * The access token carries who and which session, and nothing else.
  *
  * No role and no practice: both are resolved per request from memberships, so
- * removing a PA takes effect on her next request rather than whenever her
+ * removing a PA takes effect on their next request rather than whenever their
  * token happens to expire.
  */
 export const signAccessToken = (userId: string, sessionId: string): AccessToken => {
@@ -63,7 +67,9 @@ export const verifyAccessToken = (token: string, { allowExpired = false } = {}):
   if (payload.type !== 'access' || !payload.sub || !payload.sid) {
     throw new AppError('TOKEN_INVALID', 'Please authenticate');
   }
-  return { userId: payload.sub, sessionId: payload.sid };
+  // Every token this API signs has an expiry; one without would be treated as
+  // already expired by anything that keeps a connection open on it.
+  return { userId: payload.sub, sessionId: payload.sid, expiresAt: new Date((payload.exp ?? 0) * 1000) };
 };
 
 /**

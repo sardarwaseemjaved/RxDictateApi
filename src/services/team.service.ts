@@ -118,6 +118,7 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
     }
   }
 
+  const roleChanged = patch.role !== undefined && patch.role !== membership.role;
   if (patch.role) membership.role = patch.role;
   const locationsChanged = patch.locationIds !== undefined;
   if (patch.locationIds) {
@@ -141,6 +142,16 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
       actorId: scope.actorId,
     });
   }
+  if (roleChanged) {
+    emit('member.roleChanged', {
+      practiceId: scope.practiceId,
+      membershipId: membership._id,
+      userId: membership.userId,
+      role: membership.role,
+      locationIds: membership.locationIds,
+      actorId: scope.actorId,
+    });
+  }
 
   return after;
 };
@@ -148,12 +159,13 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
 /**
  * Sets the membership to removed.
  *
- * Her sessions are deliberately left alone: she may work at another clinic on
- * the same sign-in, and being taken off this one is not a reason to sign her
- * out of that one. Membership is read on every request, so her access to this
- * practice stops immediately anyway - resolvePractice answers
- * MEMBERSHIP_REMOVED - and everything she did stays in the audit log under her
- * name.
+ * Their sessions are deliberately left alone: they may work at another clinic
+ * on the same sign-in, and being taken off this one is not a reason to sign
+ * them out of that one. Membership is read on every request, so their access
+ * to this practice stops immediately anyway - resolvePractice answers
+ * MEMBERSHIP_REMOVED, and their live connections to this clinic are closed
+ * with the same code - and everything they did stays in the audit log under
+ * their name.
  */
 export const removeMember = async (scope: Scope, id: string): Promise<MemberView> => {
   const membership = await memberships.findByIdOrFail(scope, id, 'Member');
