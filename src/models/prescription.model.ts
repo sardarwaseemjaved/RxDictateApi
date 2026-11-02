@@ -35,6 +35,12 @@ export interface IPrescription {
   letterheadSnapshot: LetterheadSnapshot | null;
   approvedAt: Date | null;
   approvedBy: Types.ObjectId | null;
+  /**
+   * What the printout's QR code points at: 16 random bytes, base64url, made at
+   * approval. Random rather than derived from the id or the number, which can
+   * be guessed. Kept when the prescription is superseded; null on a draft.
+   */
+  verificationCode: string | null;
   pdfKey: string | null;
   /** Every doctor correction, which is how AI accuracy gets measured. */
   editLog: EditLogEntry[];
@@ -156,6 +162,7 @@ const prescriptionSchema = new Schema<IPrescription>(
     letterheadSnapshot: { type: letterheadSnapshotSubSchema, default: null },
     approvedAt: { type: Date, default: null },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    verificationCode: { type: String, default: null },
     pdfKey: { type: String, default: null },
     editLog: { type: [editLogEntrySubSchema], default: [] },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -183,6 +190,16 @@ prescriptionSchema.index(
   { unique: true, partialFilterExpression: { number: { $type: 'string' } } },
 );
 prescriptionSchema.index({ practiceId: 1, locationId: 1, status: 1, createdAt: -1 });
+
+/**
+ * The public verify page finds a prescription by its code alone, across every
+ * practice, so the code is unique across all of them. Partial for the same
+ * reason as the number: drafts carry null and must not collide on it.
+ */
+prescriptionSchema.index(
+  { verificationCode: 1 },
+  { unique: true, partialFilterExpression: { verificationCode: { $type: 'string' } } },
+);
 
 /**
  * One open draft per visit, held by the database rather than by a check that

@@ -8,6 +8,7 @@ import { sweepExpiredAudio, sweepStalledSegments } from './services/voice.servic
 import { markExpiredSessions } from './services/session.service';
 import { backfillQueuePositions } from './services/visit.service';
 import { backfillPatientLocations } from './services/patient.service';
+import { backfillVerificationCodes } from './services/verify.service';
 import { attachRealtime, type RealtimeServer } from './core/realtime';
 
 let server: Server | undefined;
@@ -68,6 +69,13 @@ const start = async (): Promise<void> => {
   const linked = await backfillPatientLocations();
   if (linked > 0) {
     logger.info(`linked ${linked} patient(s) to the locations they were seen at`);
+  }
+
+  // Every approved prescription can be checked from a QR code, including the
+  // ones signed before codes existed.
+  const coded = await backfillVerificationCodes();
+  if (coded > 0) {
+    logger.info(`gave ${coded} approved prescription(s) a verification code`);
   }
 
   if (config.otp.fixedCode) {

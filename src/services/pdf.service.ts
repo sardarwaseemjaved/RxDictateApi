@@ -5,7 +5,9 @@ import type { PrescriptionDoc } from '../models';
 import type { LetterheadSnapshot, MedicineItem, PrescriptionSections, TextItem } from '../shared/prescription.schema';
 import { LIST_SECTIONS } from '../shared/prescription.schema';
 import { medicineInstruction } from '../shared/dose';
+import { qrSvg } from '../utils/qr';
 import { wireSections } from './prescriptionOps.service';
+import { verificationUrl } from './verify.service';
 
 const escape = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -151,6 +153,12 @@ export const prescriptionHtml = (
     };
   const sections = wireSections(prescription.sections);
   const isDraft = options.draft === true;
+  // A pharmacist scans this to see what was approved. Never on a draft preview,
+  // which has no code and must not look checkable.
+  const qr =
+    !isDraft && prescription.verificationCode
+      ? `<span class="qr">${qrSvg(verificationUrl(prescription.verificationCode))}</span>`
+      : '';
 
   return `<!doctype html>
 <html lang="${bilingual ? 'en' : 'en'}">
@@ -179,12 +187,15 @@ export const prescriptionHtml = (
       .medicine-dose { font-size: 9.5pt; color: #333; }
       .medicine-note { font-size: 9pt; color: #555; }
       .medicine-note-ur { font-size: 11pt; }
-      footer { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-top: 1px solid #ccc; padding-top: 2mm; }
+      footer { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-end; font-size: 8pt; color: #666; border-top: 1px solid #ccc; padding-top: 2mm; }
+      .rx-id { display: flex; align-items: flex-end; gap: 3mm; }
+      .qr svg { display: block; width: 18mm; height: 18mm; }
+      body.has-qr { padding-bottom: 24mm; }
       .draft-band { background: #b00020; color: #fff; font-weight: 700; letter-spacing: 1pt; text-align: center; padding: 2mm; margin-bottom: 4mm; font-size: 10pt; }
       .draft-mark { position: fixed; top: 45%; left: 0; right: 0; text-align: center; font-size: 56pt; font-weight: 800; color: rgba(176, 0, 32, 0.12); transform: rotate(-24deg); letter-spacing: 6pt; pointer-events: none; }
     </style>
   </head>
-  <body>
+  <body${qr ? ' class="has-qr"' : ''}>
     ${isDraft ? '<div class="draft-mark">DRAFT</div>' : ''}
     ${isDraft ? '<div class="draft-band">DRAFT &mdash; NOT VALID. This prescription has not been approved or signed.</div>' : ''}
     ${letterheadHtml(snapshot, bilingual)}
@@ -196,7 +207,7 @@ export const prescriptionHtml = (
     </div>
     ${sectionsHtml(sections, bilingual)}
     <footer>
-      <span>${isDraft ? 'DRAFT' : escape(prescription.number ?? '')} &middot; v${prescription.version}</span>
+      <span class="rx-id">${qr}<span>${isDraft ? 'DRAFT' : escape(prescription.number ?? '')} &middot; v${prescription.version}</span></span>
       <span>${escape(snapshot.doctorName)}</span>
     </footer>
   </body>

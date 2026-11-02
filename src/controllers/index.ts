@@ -10,6 +10,7 @@ export * as prescriptionController from './prescription.controller';
 export * as reportController from './report.controller';
 export * as teamController from './team.controller';
 export * as templateController from './template.controller';
+export * as verifyController from './verify.controller';
 export * as visitController from './visit.controller';
 export * as vitalsController from './vitals.controller';
 export * as voiceController from './voice.controller';

@@ -38,6 +38,7 @@ describe('Config', () => {
       process.env.NODE_ENV = 'production';
       process.env.OTP_FIXED_CODE = '123456';
       process.env.CORS_ORIGINS = 'https://app.example.com';
+      process.env.VERIFY_BASE_URL = 'https://app.example.com/v';
 
       const config = load();
 
@@ -81,6 +82,27 @@ describe('Config', () => {
       process.env.NODE_ENV = 'development';
       process.env.CORS_ORIGINS = 'http://localhost:8081';
       expect(load().cors.origins).toEqual(['http://localhost:8081']);
+    });
+  });
+
+  describe('VERIFY_BASE_URL', () => {
+    test('production refuses to boot without it, because every QR code printed would point at a guess', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = 'https://app.example.com';
+      // Blank, not deleted, for the same reason as the OpenAI key below.
+      process.env.VERIFY_BASE_URL = '';
+      expect(load).toThrow(/VERIFY_BASE_URL must be set in production/);
+    });
+
+    test('in development it defaults to the web app on this machine, so a phone on the Wi-Fi can scan a test print', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.VERIFY_BASE_URL = '';
+      expect(load().verify.baseUrl).toMatch(/^http:\/\/[^/]+:5173\/v$/);
+    });
+
+    test('a trailing slash is dropped, so a code is never appended after two', () => {
+      process.env.VERIFY_BASE_URL = 'https://app.example.com/v/';
+      expect(load().verify.baseUrl).toBe('https://app.example.com/v');
     });
   });
 

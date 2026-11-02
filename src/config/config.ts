@@ -79,6 +79,22 @@ const envSchema = z.object({
   OTP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(5),
   /** Per minute, per IP. Signing out must stay available. */
   LOGOUT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
+  /** Per minute, per IP, across both public verify routes, so codes cannot be tried in bulk. */
+  VERIFY_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(30),
+
+  /**
+   * Where a printout's QR code points: the web app's public page for checking
+   * a prescription, `/v` on the web app. The code is appended to it. Required
+   * in production; in development it is guessed from this machine's LAN
+   * address, so a phone on the same Wi-Fi can scan a test print. Blank reads
+   * as unset.
+   */
+  VERIFY_BASE_URL: z
+    .string()
+    .url()
+    .or(z.literal(''))
+    .optional()
+    .transform((value) => (value === '' ? undefined : value)),
 
   /**
    * The address this API is reachable at from outside, used to build download
@@ -152,6 +168,14 @@ const env = parsed.data;
  */
 if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
   throw new Error('Config validation error: CORS_ORIGINS must list at least one origin in production');
+}
+
+/**
+ * Every prescription approved without it would carry a QR code pointing at a
+ * guess. The paper outlives any fix, so this fails the boot instead.
+ */
+if (env.NODE_ENV === 'production' && !env.VERIFY_BASE_URL) {
+  throw new Error('Config validation error: VERIFY_BASE_URL must be set in production');
 }
 
 /**
@@ -240,6 +264,11 @@ const config = {
     authMax: env.AUTH_RATE_LIMIT_MAX,
     otpMax: env.OTP_RATE_LIMIT_MAX,
     logoutMax: env.LOGOUT_RATE_LIMIT_MAX,
+    verifyMax: env.VERIFY_RATE_LIMIT_MAX,
+  },
+  verify: {
+    /** No trailing slash; a code is appended as `${baseUrl}/${code}`. */
+    baseUrl: (env.VERIFY_BASE_URL ?? `http://${lanAddress() ?? 'localhost'}:5173/v`).replace(/\/+$/, ''),
   },
   /** Where a download link should point. */
   publicApiUrl: env.PUBLIC_API_URL ?? `http://${lanAddress() ?? 'localhost'}:${env.PORT}`,

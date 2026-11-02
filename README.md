@@ -70,42 +70,44 @@ Copy `.env.example`. Everything is validated by zod at boot in
 [src/config/config.ts](src/config/config.ts), which fails fast rather than
 letting a missing variable become a runtime surprise. The full set:
 
-| Variable                                    | Default                     | Notes                                                            |
-| ------------------------------------------- | --------------------------- | ---------------------------------------------------------------- |
-| `PORT`                                      | `3000`                      |                                                                  |
-| `TRUST_PROXY`                               | `0`                         | proxies in front of the API; `1` behind nginx                    |
-| `MONGODB_URL`                               | —                           | required; `-test` is appended when `NODE_ENV=test`               |
-| `JWT_SECRET`                                | —                           | required, at least 16 characters                                 |
-| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`                        |                                                                  |
-| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`                        |                                                                  |
-| `OTP_EXPIRATION_MINUTES`                    | `10`                        |                                                                  |
-| `OTP_MAX_ATTEMPTS`                          | `5`                         | wrong guesses before the code is burned                          |
-| `OTP_COOLDOWN_SECONDS`                      | `60`                        | per phone number, survives a restart                             |
-| `OTP_LOG_IN_DEV`                            | `true`                      | outside production, return the code as `devCode`                 |
-| `CORS_ORIGINS`                              | dev localhosts              | **required in production**; must list the web app — see below    |
-| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                        |                                                                  |
-| `RATE_LIMIT_MAX`                            | `300`                       | the whole API                                                    |
-| `AUTH_RATE_LIMIT_MAX`                       | `20`                        | sign-in                                                          |
-| `OTP_RATE_LIMIT_MAX`                        | `5`                         | keyed on the phone number, not the IP                            |
-| `PUBLIC_API_URL`                            | this machine's LAN address  | where download links point; set it behind a proxy                |
-| `STORAGE_DRIVER`                            | `local`                     | `local` or `s3`                                                  |
-| `STORAGE_LOCAL_DIR`                         | `.storage`                  | for the `local` driver                                           |
-| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —                           | any S3 or R2 bucket                                              |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —                           |                                                                  |
-| `S3_FORCE_PATH_STYLE`                       | `true`                      | needed by R2 and MinIO                                           |
-| `SIGNED_URL_TTL_SECONDS`                    | `300`                       | audio and PDF links                                              |
-| `MAX_AUDIO_UPLOAD_MB`                       | `20`                        | per dictation segment                                            |
-| `SMS_PROVIDER`                              | `log`                       | sign-in codes and "you were added"                               |
-| `SMS_SENDER_ID`                             | `Clinic`                    |                                                                  |
-| `STT_PROVIDER`                              | `none`                      | `none`, `mock` or `openai`; see **Voice** below                  |
-| `LLM_PROVIDER`                              | `none`                      | `none`, `mock` or `openai`                                       |
-| `OPENAI_API_KEY`                            | —                           | required when either provider is `openai`; boot fails without it |
-| `OPENAI_BASE_URL`                           | `https://api.openai.com/v1` |                                                                  |
-| `OPENAI_MODEL`                              | `gpt-4o-mini`               | turns a transcript into ops                                      |
-| `OPENAI_STT_MODEL`                          | `gpt-4o-transcribe`         | transcription                                                    |
-| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`                     | a stalled segment is failed, not left hanging                    |
-| `PDF_RENDERER_URL`                          | —                           | an HTML-to-PDF service; without one the print file is HTML       |
-| `AUDIO_RETENTION_DAYS`                      | `30`                        | default for a new practice, days after approval                  |
+| Variable                                    | Default                       | Notes                                                                                                                   |
+| ------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                                      | `3000`                        |                                                                                                                         |
+| `TRUST_PROXY`                               | `0`                           | proxies in front of the API; `1` behind nginx                                                                           |
+| `MONGODB_URL`                               | —                             | required; `-test` is appended when `NODE_ENV=test`                                                                      |
+| `JWT_SECRET`                                | —                             | required, at least 16 characters                                                                                        |
+| `JWT_ACCESS_EXPIRATION_MINUTES`             | `30`                          |                                                                                                                         |
+| `JWT_REFRESH_EXPIRATION_DAYS`               | `30`                          |                                                                                                                         |
+| `OTP_EXPIRATION_MINUTES`                    | `10`                          |                                                                                                                         |
+| `OTP_MAX_ATTEMPTS`                          | `5`                           | wrong guesses before the code is burned                                                                                 |
+| `OTP_COOLDOWN_SECONDS`                      | `60`                          | per phone number, survives a restart                                                                                    |
+| `OTP_LOG_IN_DEV`                            | `true`                        | outside production, return the code as `devCode`                                                                        |
+| `CORS_ORIGINS`                              | dev localhosts                | **required in production**; must list the web app — see below                                                           |
+| `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                          |                                                                                                                         |
+| `RATE_LIMIT_MAX`                            | `300`                         | the whole API                                                                                                           |
+| `AUTH_RATE_LIMIT_MAX`                       | `20`                          | sign-in                                                                                                                 |
+| `OTP_RATE_LIMIT_MAX`                        | `5`                           | keyed on the phone number, not the IP                                                                                   |
+| `VERIFY_RATE_LIMIT_MAX`                     | `30`                          | per minute per IP, both public verify routes together                                                                   |
+| `PUBLIC_API_URL`                            | this machine's LAN address    | where download links point; set it behind a proxy                                                                       |
+| `VERIFY_BASE_URL`                           | `http://{LAN address}:5173/v` | **required in production**; the web app's `/v` page, which a printout's QR code links to — see **Verifying a printout** |
+| `STORAGE_DRIVER`                            | `local`                       | `local` or `s3`                                                                                                         |
+| `STORAGE_LOCAL_DIR`                         | `.storage`                    | for the `local` driver                                                                                                  |
+| `S3_BUCKET` / `S3_REGION` / `S3_ENDPOINT`   | —                             | any S3 or R2 bucket                                                                                                     |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —                             |                                                                                                                         |
+| `S3_FORCE_PATH_STYLE`                       | `true`                        | needed by R2 and MinIO                                                                                                  |
+| `SIGNED_URL_TTL_SECONDS`                    | `300`                         | audio and PDF links                                                                                                     |
+| `MAX_AUDIO_UPLOAD_MB`                       | `20`                          | per dictation segment                                                                                                   |
+| `SMS_PROVIDER`                              | `log`                         | sign-in codes and "you were added"                                                                                      |
+| `SMS_SENDER_ID`                             | `Clinic`                      |                                                                                                                         |
+| `STT_PROVIDER`                              | `none`                        | `none`, `mock` or `openai`; see **Voice** below                                                                         |
+| `LLM_PROVIDER`                              | `none`                        | `none`, `mock` or `openai`                                                                                              |
+| `OPENAI_API_KEY`                            | —                             | required when either provider is `openai`; boot fails without it                                                        |
+| `OPENAI_BASE_URL`                           | `https://api.openai.com/v1`   |                                                                                                                         |
+| `OPENAI_MODEL`                              | `gpt-4o-mini`                 | turns a transcript into ops                                                                                             |
+| `OPENAI_STT_MODEL`                          | `gpt-4o-transcribe`           | transcription                                                                                                           |
+| `VOICE_SEGMENT_TIMEOUT_MS`                  | `90000`                       | a stalled segment is failed, not left hanging                                                                           |
+| `PDF_RENDERER_URL`                          | —                             | an HTML-to-PDF service; without one the print file is HTML                                                              |
+| `AUDIO_RETENTION_DAYS`                      | `30`                          | default for a new practice, days after approval                                                                         |
 
 **`CORS_ORIGINS` and the web app.** Comma separated. Setting it **replaces** the
 dev defaults (`http://localhost:3000`, `:5173`, `:8081`, `:19006`) rather than
@@ -218,6 +220,8 @@ a report from the app can be traced to the request that caused it.
 Base path `/api/v1`. Everything except `/auth` needs `X-Practice-Id`; `/me` is the
 exception that proves the rule, since its answer is what tells the app which
 practice ids exist. Visits, prescriptions and voice also need `X-Location-Id`.
+Two kinds of route are public and need neither header: `/verify`, which a
+printout's QR code leads to, and `/files`, where a signed link is the credential.
 
 | Module        | Routes                                                                                                                                                                                       | Who                               |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
@@ -237,6 +241,7 @@ practice ids exist. Visits, prescriptions and voice also need `X-Location-Id`.
 | reports       | `POST /reports/:id/review`                                                                                                                                                                   | doctor                            |
 | templates     | `GET`/`POST /templates`, `GET`/`PATCH`/`DELETE /templates/:id`, `POST /prescriptions/from-template/:id`                                                                                      | doctor                            |
 | files         | `GET`/`PUT /files/<key>?…&sig=` — local storage driver only                                                                                                                                  | whoever holds the signed link     |
+| verify        | `GET /verify/:code`, `GET /verify/:code/qr.svg` — see **Verifying a printout**                                                                                                               | anyone, 30 a minute per address   |
 
 `GET /prescriptions` takes `from`, `to` (Karachi days, inclusive) and `q` (a
 patient's name, phone or MR number, matched as patient search matches them), and
@@ -617,6 +622,71 @@ and the PDF stored; without one, the HTML is stored and `meta.format` says so.
 dictated one. Together they are how the accuracy of the voice pipeline gets
 measured over real use.
 
+## Verifying a printout
+
+Anyone can print a page that looks like a doctor's letterhead, and anyone can
+change "5 days" to "30" with a pen. So every approved printout carries a QR code
+beside its Rx ID. A pharmacist scans it with any phone camera and sees, from the
+server, what the doctor actually approved.
+
+**The code.** Approving a prescription gives it a `verificationCode` in the same
+write as the signature: 16 random bytes, base64url, 22 characters. It is random
+rather than derived from the id or the Rx number, both of which can be guessed,
+and a unique partial index holds it unique across every clinic. A superseded
+prescription keeps its code; a draft or a cancelled one has none. At boot,
+`backfillVerificationCodes()` gives every approved or superseded prescription from
+before codes existed its own.
+
+**The link.** The QR holds `{VERIFY_BASE_URL}/{code}` and never any patient
+data. `VERIFY_BASE_URL` is the web app's public `/v` page, outside sign-in;
+it is **required in production**, and in development defaults to
+`http://{this machine's LAN address}:5173/v`, so a phone on the same Wi-Fi can
+scan a test print. `PrescriptionView.verification` is `{ code, url }`, and null
+before approval.
+
+**Two public routes**, with no sign-in and no `X-Practice-Id`, so they sit outside
+the rule every other route follows:
+
+- `GET /verify/:code` answers `verifyViewSchema`
+  ([src/shared/verify.schema.ts](src/shared/verify.schema.ts)):
+  - `status`, the Rx ID and when it was approved;
+  - the doctor and clinic from the letterhead snapshot, as printed;
+  - the medicines;
+  - a patient line: the initials of the first and last words of the name
+    ("M. K."), the age as the printout showed it (from the date of birth on the
+    day of approval, or the age that was typed), and sex.
+
+  Never the name, phone or MR number, and never the diagnosis, complaints,
+  history, examination, labs, diet or advice, because anyone holding the paper
+  can scan it.
+
+- `GET /verify/:code/qr.svg` is the QR image (`verifyQrPath(code)`), drawn by the
+  server so neither app needs a QR library:
+  - error correction M, and no quiet zone because the printout leaves its own;
+  - `Cache-Control: public, max-age=31536000, immutable`;
+  - cross-origin, so the web app can show it in an `<img>`.
+
+**Replaced.** A superseded prescription answers `replaced`, with `replacedBy`
+naming the approved version that stands now (the newest, through any revisions
+in between), and no medicines, because the old list is no longer valid. Version
+1 is only superseded when version 2 is approved, so while a revision is still a
+draft the paper in the patient's hand answers `valid`.
+
+**Giving nothing away.**
+
+- An unknown code, a malformed one, and one on a draft or cancelled
+  prescription all answer the same `NOT_FOUND`.
+- Both routes share their own bucket of 30 requests a minute per address
+  (`VERIFY_RATE_LIMIT_MAX`), so codes cannot be tried in bulk.
+- The request log keeps only the first four characters of a code
+  (`/verify/k7Q2…`).
+- A read writes no audit row.
+
+**The server's printout** puts the QR, as inline SVG, in the footer beside the
+Rx ID. The draft preview stays as it was, with no QR and no Rx number. A
+print file rendered before codes existed has no QR; it is rendered once and
+kept, so a reprint of one of those still shows none.
+
 ## Voice
 
 One segment of audio at a time, base64 inside the JSON body, with `seq` strictly
@@ -843,27 +913,29 @@ No local mongod, no CI service container.
 
 The suites that exist to hold the six rules down:
 
-| File                                                                                       | What it proves                                                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                                                                 |
-| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                                                                    |
-| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                                                                |
-| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                                                                                                                        |
-| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                                                              |
-| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                                                                                                                     |
-| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                                                                  |
-| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)               | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                                                               |
-| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)   | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill                                        |
-| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                                                            |
-| [tests/integration/history.test.ts](tests/integration/history.test.ts)                     | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                                                                      |
-| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                 | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                                                             |
-| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)   | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                                                             |
-| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                                                         |
-| [tests/integration/realtime.test.ts](tests/integration/realtime.test.ts)                   | the realtime socket: every sign-in failure gives the HTTP code and closes; a fresh token keeps it open; who hears which topic; every row of the topics table sends exactly one message; lost access closes the right sockets; no message carries a name, phone or medical field |
-| [tests/integration/realtimeTimers.test.ts](tests/integration/realtimeTimers.test.ts)       | under fake timers: an unsigned socket is closed after 10 s, the heartbeat goes out every 25 s, and a socket that stops answering pings is terminated                                                                                                                            |
-| [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited                                        |
-| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                                                                      |
-| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                                                                                                                              |
-| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                                                                                                                                        |
+| File                                                                                       | What it proves                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                                                                                   |
+| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                                                                                      |
+| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                                                                                  |
+| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                                                                                                                                          |
+| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                                                                                |
+| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                                                                                                                                       |
+| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                                                                                    |
+| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)               | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                                                                                 |
+| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)   | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill                                                          |
+| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                                                                              |
+| [tests/integration/history.test.ts](tests/integration/history.test.ts)                     | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                                                                                        |
+| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                 | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                                                                               |
+| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)   | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                                                                               |
+| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                                                                           |
+| [tests/integration/realtime.test.ts](tests/integration/realtime.test.ts)                   | the realtime socket: every sign-in failure gives the HTTP code and closes; a fresh token keeps it open; who hears which topic; every row of the topics table sends exactly one message; lost access closes the right sockets; no message carries a name, phone or medical field                   |
+| [tests/integration/realtimeTimers.test.ts](tests/integration/realtimeTimers.test.ts)       | under fake timers: an unsigned socket is closed after 10 s, the heartbeat goes out every 25 s, and a socket that stops answering pings is terminated                                                                                                                                              |
+| [tests/integration/verify.test.ts](tests/integration/verify.test.ts)                       | a printout's QR: approval makes a unique code, the backfill fills old ones, the public page answers `valid` or `replaced` with no name, phone, MR number or clinical section, every kind of miss is the same `NOT_FOUND`, the SVG decodes to the link, and the log keeps only the start of a code |
+| [tests/integration/verifyRateLimit.test.ts](tests/integration/verifyRateLimit.test.ts)     | the verify routes share their own bucket of 30 a minute, and the 31st answers `RATE_LIMITED`                                                                                                                                                                                                      |
+| [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited                                                          |
+| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                                                                                        |
+| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                                                                                                                                                |
+| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                                                                                                                                                          |
 
 # RxDictateApi

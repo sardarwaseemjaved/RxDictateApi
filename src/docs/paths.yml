@@ -390,3 +390,85 @@ paths:
       responses:
         '200': { description: The deleted template }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /verify/{code}:
+    parameters:
+      - in: path
+        name: code
+        required: true
+        description: The last part of the link in a printout's QR code. 22 characters of base64url.
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' }
+    get:
+      tags: [Verify]
+      summary: Check a printed prescription against what the doctor approved
+      description: |
+        Public and permanent: no sign-in, no X-Practice-Id, no expiry. A pharmacist reaches it by
+        scanning the printout's QR code, which opens the web app's /v/{code} page, which reads this.
+
+        Answers verifyViewSchema (src/shared/verify.schema.ts): status, the Rx ID, when it was
+        approved, the doctor and clinic as printed, the medicines, and a patient line of initials,
+        age and sex. Never the patient's name, phone or MR number, and never the diagnosis,
+        complaints, history, examination, labs, diet or advice.
+
+        A superseded prescription answers status `replaced`, with `replacedBy` naming the approved
+        version that stands now, and no medicines. While a revision is still a draft, the original
+        answers `valid`.
+
+        An unknown or malformed code, or one on a draft or cancelled prescription, all answer the
+        same NOT_FOUND. Shares a limit of 30 requests a minute per address with the QR image. A read
+        writes no audit row, and the request log keeps only the first four characters of the code.
+      security: []
+      responses:
+        '200':
+          description: The prescription as approved
+          content:
+            application/json:
+              example:
+                data:
+                  status: valid
+                  number: RX-2026-000418
+                  approvedAt: '2026-11-01T09:12:44.000Z'
+                  doctor:
+                    {
+                      name: Dr Shakeel Ahmed,
+                      qualifications: [MBBS, FCPS],
+                      speciality: Consultant Physician,
+                      pmdcNo: '12345-P',
+                    }
+                  clinic: { name: Health Care, address: 'I-8/2, Islamabad' }
+                  patient: { initials: M. K., age: 52, sex: male }
+                  medicines:
+                    - name: Omeprazole
+                      strength: 20mg
+                      form: cap
+                      route: oral
+                      pattern: { m: 1, a: 0, n: 0 }
+                      timing: before_meal
+                      durationDays: 14
+                      instructionEn: ''
+                      instructionUr: ''
+                  replacedBy: null
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { description: RATE_LIMITED - more than 30 verify requests a minute from this address }
+
+  /verify/{code}/qr.svg:
+    parameters:
+      - { in: path, name: code, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_-]{22}$' } }
+    get:
+      tags: [Verify]
+      summary: The QR code a printout shows, as an SVG
+      description: |
+        Public, like the page. The QR of prescription.verification.url, at error correction level M
+        and with no quiet zone, because the printout leaves its own space. No width or height: size
+        it where it is shown. Cache-Control: public, max-age=31536000, immutable, and
+        Cross-Origin-Resource-Policy: cross-origin so the web app can show it in an <img>.
+
+        The path is verifyQrPath(code) in src/shared/verify.schema.ts. Same limit as the page.
+      security: []
+      responses:
+        '200':
+          description: The QR image
+          content:
+            image/svg+xml: { schema: { type: string } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { description: RATE_LIMITED }

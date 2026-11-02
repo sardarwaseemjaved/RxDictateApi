@@ -57,4 +57,17 @@ export const logoutLimiter = limiter({
   limit: config.rateLimit.logoutMax,
 });
 
-export default { generalLimiter, authLimiter, otpLimiter, logoutLimiter };
+/**
+ * The public verify routes, in their own bucket shared by both. A pharmacist
+ * scans a page or two; anything near this many a minute from one address is
+ * somebody trying codes in bulk.
+ *
+ * The limit is read per request, so a test can tighten it without reloading
+ * the app.
+ */
+export const verifyLimiter = limiter({
+  windowMs: 60 * 1000,
+  limit: () => config.rateLimit.verifyMax,
+});
+
+export default { generalLimiter, authLimiter, otpLimiter, logoutLimiter, verifyLimiter };

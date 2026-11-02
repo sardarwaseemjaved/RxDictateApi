@@ -160,6 +160,10 @@ CORS_ORIGINS=https://api.yourclinic.pk
 # Download links are built from this. Unset, it is the VM's private 10.x
 # address, which no phone can reach.
 PUBLIC_API_URL=https://api.yourclinic.pk
+# Required in production. What every printout's QR code links to: the web
+# app's public /v page. Printed on paper that is kept for months, so set it to
+# the address the web app will keep.
+VERIFY_BASE_URL=https://app.yourclinic.pk/v
 
 STT_PROVIDER=openai
 LLM_PROVIDER=openai

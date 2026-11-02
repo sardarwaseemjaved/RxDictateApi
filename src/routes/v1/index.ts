@@ -14,6 +14,7 @@ import drugRoute from './drug.route';
 import notificationRoute from './notification.route';
 import deviceRoute from './device.route';
 import templateRoute from './template.route';
+import verifyRoute from './verify.route';
 import reportRoute from './report.route';
 import appointmentRoute from './appointment.route';
 import followUpRoute from './followUp.route';
@@ -32,6 +33,10 @@ const router = express.Router();
  *
  * Every route except /auth needs X-Practice-Id. /me is the exception that
  * proves it: its answer is what tells the app which practice ids exist.
+ *
+ * Two more are outside that rule, and outside sign-in altogether: /verify,
+ * which a pharmacist reaches by scanning a printout, and /files below, where a
+ * signed link is the credential.
  */
 const routes = [
   { path: '/auth', route: authRoute },
@@ -50,6 +55,8 @@ const routes = [
   { path: '/reports', route: reportRoute },
   { path: '/notifications', route: notificationRoute },
   { path: '/templates', route: templateRoute },
+  // Public: a printout's QR code. No sign-in and no X-Practice-Id.
+  { path: '/verify', route: verifyRoute },
   // Not built yet; mounted so the app can link to them.
   { path: '/devices', route: deviceRoute },
   { path: '/portal', route: portalRoute },

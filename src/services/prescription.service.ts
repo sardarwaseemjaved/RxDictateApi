@@ -44,6 +44,7 @@ import { findOrCreateDrug } from './drug.service';
 import { findPatientOrFail, linkPatient, patientMatch, toPatientSummary, visiblePatients } from './patient.service';
 import { renderPrescription, renderPreview } from './pdf.service';
 import { findOwnTemplate, markTemplateUsed } from './template.service';
+import { newVerificationCode, verificationOf } from './verify.service';
 import { changeVisitStatus, ensureVisit } from './visit.service';
 
 const prescriptions = new BaseRepository<IPrescription>(Prescription, { locationScoped: true });
@@ -81,6 +82,7 @@ export const toPrescriptionView = (
     approvedAt: prescription.approvedAt,
     approvedBy: prescription.approvedBy ? String(prescription.approvedBy) : null,
     hasPdf: prescription.pdfKey !== null,
+    verification: verificationOf(prescription),
     editCount: prescription.editLog.length,
     createdAt: prescription.createdAt,
     updatedAt: prescription.updatedAt,
@@ -605,6 +607,9 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
   prescription.status = 'approved';
   prescription.approvedAt = approvedAt;
   prescription.approvedBy = scope.actorId;
+  // What the printout's QR code points at, in the same write as the signature,
+  // so there is never an approved prescription a pharmacist cannot check.
+  prescription.verificationCode = newVerificationCode();
 
   await resolveMedicineDrugs(prescription, scope.actorId);
   await prescription.save();

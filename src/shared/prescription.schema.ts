@@ -265,6 +265,13 @@ export const prescriptionViewSchema = z.object({
   approvedBy: objectIdSchema.nullable(),
   /** Whether a print file has been rendered yet, not where it is. */
   hasPdf: z.boolean(),
+  /**
+   * What the printout's QR code holds: `url` is the public page that shows
+   * what was approved, and `code` is its last part. Set at approval and kept
+   * when the prescription is superseded; null for a draft or a cancelled one.
+   * The QR image itself is GET /verify/{code}/qr.svg (verifyQrPath).
+   */
+  verification: z.object({ code: z.string(), url: z.string().url() }).nullable(),
   /** How many corrections the doctor has made, which is the AI accuracy measure. */
   editCount: z.number().int().min(0),
   createdAt: z.coerce.date(),
