@@ -54,7 +54,9 @@ components:
       required: true
       schema:
         type: string
-      description: Required on every route except /auth
+      description: >-
+        Required on every route except /auth and /me. The id of an organisation you belong to. Every route serves
+        clinics only, and a platform membership's id is FORBIDDEN there, except /settings, which serves any kind.
     LocationId:
       in: header
       name: X-Location-Id

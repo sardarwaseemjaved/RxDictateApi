@@ -208,6 +208,13 @@ pm2 logs clinic-api
 You should see `Connected to MongoDB` and `Listening to port 3000`. If you see a
 `Config validation error`, it names the variable that is missing.
 
+Once, on the server, make RxDictate's own organisation and its first admin, with
+the phone that admin signs in with. Running it again changes nothing:
+
+```sh
+cd /srv/clinic-api && node dist/scripts/platformInit.js --phone +923001234567
+```
+
 ### 6. Start on boot, rotate logs
 
 On the server, run this. It prints a `sudo ...` command; run that too:

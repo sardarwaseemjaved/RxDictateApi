@@ -1,5 +1,5 @@
 import type { Types } from 'mongoose';
-import type { Role } from '../shared/roles';
+import type { OrganisationType, Role } from '../shared/roles';
 
 /**
  * What the middleware chain hangs on the request, in the order it is set:
@@ -17,6 +17,8 @@ declare global {
 
     interface PracticeContext {
       practiceId: Types.ObjectId;
+      /** What kind of organisation practiceId is. Always one the route serves: resolveOrganisation checked. */
+      organisationType: OrganisationType;
       membershipId: Types.ObjectId;
       actorId: Types.ObjectId;
       role: Role;

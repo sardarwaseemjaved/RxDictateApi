@@ -127,6 +127,17 @@ on('voice.segmentFailed', ({ practiceId, prescriptionId, doctorId }) =>
   tell(member(practiceId, doctorId), 'voice', prescriptionId),
 );
 
+/* Settings, to whoever the changed layer applies to. */
+on('settings.changed', (change) => {
+  if (change.layer === 'user') {
+    tell(member(change.organisationId, change.userId), 'settings');
+  } else if (change.layer === 'organisation') {
+    tell(everyone(change.organisationId), 'settings');
+  } else {
+    tell({ to: 'all' }, 'settings');
+  }
+});
+
 /* A session that ended takes its sockets with it. */
 on('session.revoked', ({ sessionId }) => {
   shut(

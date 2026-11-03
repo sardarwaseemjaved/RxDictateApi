@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { objectIdSchema, phoneSchema } from './common';
-import { roleSchema } from './roles';
+import { actionSchema, organisationTypeSchema, roleSchema } from './roles';
 
 export const sendOtpBodySchema = z.object({
   phone: phoneSchema,
@@ -86,12 +86,21 @@ export const tokenPairSchema = z.object({
 });
 export type TokenPair = z.infer<typeof tokenPairSchema>;
 
-/** What a membership looks like to the app, with its locations resolved. */
+/**
+ * What a membership looks like to the app, with its locations resolved.
+ *
+ * `practiceId` is the organisation's id and `practiceName` its name, whatever
+ * its type. `can` is every action this role holds, from the same table the
+ * server enforces, so the app shows or hides on actions and never on role
+ * names.
+ */
 export const membershipViewSchema = z.object({
   id: objectIdSchema,
   practiceId: objectIdSchema,
   practiceName: z.string(),
+  organisationType: organisationTypeSchema,
   role: roleSchema,
+  can: z.array(actionSchema),
   locationIds: z.array(objectIdSchema),
   locations: z.array(
     z.object({

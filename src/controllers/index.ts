@@ -8,6 +8,7 @@ export * as patientController from './patient.controller';
 export * as practiceController from './practice.controller';
 export * as prescriptionController from './prescription.controller';
 export * as reportController from './report.controller';
+export * as settingsController from './settings.controller';
 export * as teamController from './team.controller';
 export * as templateController from './template.controller';
 export * as verifyController from './verify.controller';

@@ -56,6 +56,14 @@ const BUILT: Route[] = [
     path: '/api/v1/templates',
     body: { name: 'Viral fever', sections: { advice: [{ id: 'a', text: 'Fluids' }] } },
   },
+
+  { method: 'get', path: '/api/v1/settings' },
+  { method: 'patch', path: '/api/v1/settings/me', body: { values: [{ key: 'medicines.source', value: 'all' }] } },
+  {
+    method: 'patch',
+    path: '/api/v1/settings/organisation',
+    body: { values: [{ key: 'medicines.source', value: 'myList' }] },
+  },
 ];
 
 /** Mounted now, answering 501, so nothing is renamed when they go live. */

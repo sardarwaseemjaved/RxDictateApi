@@ -391,6 +391,140 @@ paths:
         '200': { description: The deleted template }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /me:
+    get:
+      tags: [Me]
+      summary: Who is signed in, what they practise, and every organisation they belong to
+      description: |
+        Needs no X-Practice-Id: its answer is what tells the app which ids exist. data is meViewSchema
+        (src/shared/me.schema.ts), including specialties (SPECIALTIES in src/shared/specialties.ts).
+
+        Each membership (membershipViewSchema) carries organisationType - clinic, platform or company -
+        and can: every action its role holds, from the one table in src/core/permissions. The apps show
+        and hide on can, never on role names, and the server refuses exactly what is missing from it.
+        practiceId is the organisation's id and practiceName its name, whatever its type.
+
+        A platform membership (made by yarn platform:init) has no locations, and its can holds
+        settings.read and settings.platform.update and nothing of a clinic's. Sending its id as
+        X-Practice-Id to any clinic route answers FORBIDDEN.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The signed-in person and their memberships }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    patch:
+      tags: [Me]
+      summary: Change your name or your specialties
+      description: |
+        Body updateMeBodySchema { name?, specialties? }. specialties replaces the whole list; each value
+        is kept once, and an empty list clears it. They belong to the person, so they are the same in
+        every clinic. The letterhead's speciality line is separate and stays as typed. Audited in every
+        organisation the person is active in.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: The same shape as GET /me }
+        '400': { description: VALIDATION_ERROR - for example a specialty not in the list }
+
+  /locations:
+    post:
+      tags: [Locations]
+      summary: Add a location (doctor)
+      description: |
+        Body createLocationBodySchema. Besides the letterhead fields, province (PROVINCES in
+        src/shared/location.schema.ts, or null) and city (free text, stored trimmed and in title case,
+        so "lahore" is saved as "Lahore"; blank is null), which later features match on.
+        PATCH /locations/{id} takes the same fields, each optional, and changes only the ones sent.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: The location (locationViewSchema), with province and city }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Every setting, as it applies to you in this organisation
+      description: |
+        For any member of any kind of organisation (permission settings.read). X-Practice-Id says
+        which membership is asking. data is settingsViewSchema (src/shared/settings.ts): every key in
+        the registry, each as { value, source, locked }.
+
+        source is where the value came from: user (your own, in this organisation), organisation
+        (this clinic's), platform (RxDictate's, for everyone) or default (nobody set it). The server
+        works it out: your own value, unless a layer above locked it, then the organisation's, then
+        the platform's, then the registry's default. A lock beats every layer below it, and locked is
+        true when one decided the value. A value the registry no longer accepts counts as unset.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '200':
+          description: Every setting
+          content:
+            application/json:
+              example:
+                data: { medicines.source: { value: myList, source: organisation, locked: true } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /settings/me:
+    patch:
+      tags: [Settings]
+      summary: Set or take away your own values
+      description: |
+        Body updateUserSettingsBodySchema (SettingsPatch) { values: [{ key, value }] }. A value sets yours; null takes it away, so what
+        applies above shows through. A list rather than an object keyed by setting, because a setting's
+        key has a dot in it and the API strips dotted keys from request bodies.
+
+        VALIDATION_ERROR, with details against each change (body.values.N.key or .value), for a key
+        that is not in the registry, one a person may not set for themselves, one named twice, a
+        value its schema refuses, and a key a layer above has locked ("is locked by your clinic").
+        Taking your value away is allowed under a lock. Answers with GET /settings's shape.
+        Audited when something changed, and sends settings over the realtime socket to your own
+        sockets in this organisation.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example: { values: [{ key: medicines.source, value: all }] }
+      responses:
+        '200': { description: Every setting, as it now applies to you }
+        '400': { description: VALIDATION_ERROR }
+
+  /settings/organisation:
+    patch:
+      tags: [Settings]
+      summary: Set, lock or take away the clinic's values (doctor)
+      description: |
+        Permission settings.organisation.update: a clinic's doctor. Body { values: [{ key, value,
+        locked? }] }. locked: true stops the people in the clinic changing it, on a key the registry
+        marks lockable; leaving locked out keeps the lock as it was. value null takes the clinic's value
+        and its lock away. Refused as for /settings/me, plus a lock on a key that is not lockable, and
+        a key RxDictate has locked ("is locked by RxDictate"). Sends settings to everyone in the clinic.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example: { values: [{ key: medicines.source, value: myList, locked: true }] }
+      responses:
+        '200': { description: Every setting, as it now applies to the caller }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /settings/platform:
+    patch:
+      tags: [Settings]
+      summary: Set, lock or take away a value for every organisation (platform admin)
+      description: |
+        Permission settings.platform.update: a platformAdmin, with the platform's id as X-Practice-Id.
+        The same body as /settings/organisation. A platform lock beats every clinic's value and every
+        person's. Sends settings to every open socket.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '200': { description: Every setting, as it now applies to the caller }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /verify/{code}:
     parameters:
       - in: path

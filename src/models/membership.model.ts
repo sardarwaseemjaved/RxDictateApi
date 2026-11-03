@@ -1,6 +1,7 @@
 import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
 import { paginate, toJSON, type PaginateModel } from './plugins';
-import type { MembershipStatus, Role } from '../shared/roles';
+import { roleFitsOrganisation, roleSchema, type MembershipStatus, type Role } from '../shared/roles';
+import { Practice } from './practice.model';
 
 /**
  * What one user may do inside one practice. The role lives here and not on the
@@ -30,7 +31,7 @@ const membershipSchema = new Schema<IMembership>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     practiceId: { type: Schema.Types.ObjectId, ref: 'Practice', required: true },
-    role: { type: String, enum: ['doctor', 'pa', 'patient'], required: true },
+    role: { type: String, enum: roleSchema.options, required: true },
     locationIds: { type: [{ type: Schema.Types.ObjectId, ref: 'Location' }], default: [] },
     status: { type: String, enum: ['active', 'removed'], default: 'active' },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -39,6 +40,21 @@ const membershipSchema = new Schema<IMembership>(
   },
   { timestamps: true },
 );
+
+/**
+ * A role belongs to one kind of organisation: a doctor to a clinic, a platform
+ * admin to the platform. Checked here, on every save, so no route, script or
+ * test can make a membership that does not fit - and a platform role can only
+ * ever come from the platform. A membership of an organisation that does not
+ * exist fits nothing.
+ */
+membershipSchema.path('role').validate({
+  validator: async function fitsOrganisation(this: MembershipDoc, role: Role): Promise<boolean> {
+    const organisation = await Practice.findById(this.practiceId).select('type');
+    return organisation !== null && roleFitsOrganisation(role, organisation.type);
+  },
+  message: (props: { value: unknown }) => `${String(props.value)} is not a role in this kind of organisation`,
+});
 
 membershipSchema.plugin(toJSON);
 membershipSchema.plugin(paginate);

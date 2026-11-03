@@ -1,5 +1,5 @@
 import { actionsFor, can } from '../../../src/core/permissions';
-import { ACTIONS } from '../../../src/shared/roles';
+import { ACTIONS, ROLES_BY_ORGANISATION_TYPE, roleSchema } from '../../../src/shared/roles';
 
 describe('The permissions table', () => {
   /** The table in the spec, read straight across. */
@@ -70,6 +70,35 @@ describe('The permissions table', () => {
   test('a doctor can do everything a PA can', () => {
     actionsFor('pa').forEach((action) => {
       expect(can('doctor', action)).toBe(true);
+    });
+  });
+
+  describe('settings and the platform', () => {
+    test('everybody who works somewhere reads settings; a patient still holds nothing', () => {
+      ['doctor', 'pa', 'platformAdmin', 'reviewer', 'contentManager'].forEach((role) => {
+        expect(can(role as 'doctor', 'settings.read')).toBe(true);
+      });
+      expect(can('patient', 'settings.read')).toBe(false);
+    });
+
+    test("a clinic's doctor sets the clinic's settings, and only a platform admin sets the platform's", () => {
+      expect(ACTIONS.filter((action) => action.startsWith('settings.')).length).toBe(3);
+      expect(roleSchema.options.filter((role) => can(role, 'settings.organisation.update'))).toEqual(['doctor']);
+      expect(roleSchema.options.filter((role) => can(role, 'settings.platform.update'))).toEqual(['platformAdmin']);
+    });
+
+    test("the platform's roles hold none of a clinic's actions", () => {
+      expect(actionsFor('platformAdmin')).toEqual(['settings.read', 'settings.platform.update']);
+      expect(actionsFor('reviewer')).toEqual(['settings.read']);
+      expect(actionsFor('contentManager')).toEqual(['settings.read']);
+    });
+
+    test('every role belongs to exactly one kind of organisation, and a company has none yet', () => {
+      roleSchema.options.forEach((role) => {
+        const holders = Object.values(ROLES_BY_ORGANISATION_TYPE).filter((roles) => roles.includes(role));
+        expect({ role, kinds: holders.length }).toEqual({ role, kinds: 1 });
+      });
+      expect(ROLES_BY_ORGANISATION_TYPE.company).toEqual([]);
     });
   });
 });

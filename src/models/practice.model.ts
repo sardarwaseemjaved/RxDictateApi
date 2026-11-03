@@ -1,13 +1,20 @@
 import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
 import { paginate, toJSON, type PaginateModel } from './plugins';
 import type { PracticeFeatures, PracticeSettings } from '../shared/practice.schema';
+import { organisationTypeSchema, type OrganisationType } from '../shared/roles';
 
 /**
  * The tenant. Built for one doctor today, but every other record points at a
  * practice so the same code serves a doctor with two locations or a clinic with
  * several doctors later. The UI never uses the word.
+ *
+ * A practice is an organisation, and `type` says which kind. Every practice
+ * made before types existed is a clinic, and the boot backfill writes that
+ * down. The letterhead fields and counters mean nothing to the platform and
+ * stay at their defaults there.
  */
 export interface IPractice {
+  type: OrganisationType;
   name: string;
   ownerId: Types.ObjectId;
   pmdcNo: string;
@@ -37,6 +44,7 @@ export type PracticeDoc = HydratedDocument<IPractice>;
 
 const practiceSchema = new Schema<IPractice>(
   {
+    type: { type: String, enum: organisationTypeSchema.options, default: 'clinic' },
     name: { type: String, required: true, trim: true },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     pmdcNo: { type: String, default: '', trim: true },
@@ -61,6 +69,8 @@ practiceSchema.plugin(toJSON);
 practiceSchema.plugin(paginate);
 
 practiceSchema.index({ ownerId: 1 });
+// There is exactly one platform, and two runs of platform:init at once cannot make a second.
+practiceSchema.index({ type: 1 }, { unique: true, partialFilterExpression: { type: 'platform' } });
 
 export const Practice = mongoose.model<IPractice, PaginateModel<IPractice>>('Practice', practiceSchema, 'practices');
 export default Practice;

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import type { Types } from 'mongoose';
 import logger from '../../config/logger';
 import type { Role } from '../../shared/roles';
+import type { SettingKey, SettingLayer } from '../../shared/settings';
 import type { VisitStatus } from '../../shared/visit.schema';
 
 /**
@@ -155,6 +156,14 @@ export interface EventPayloads {
   'notification.created': { practiceId: Types.ObjectId; userIds: Types.ObjectId[] };
   /** Some of this person's notifications were marked read, which moves their badge on every device. */
   'notification.read': { practiceId: Types.ObjectId; userId: Types.ObjectId };
+  /**
+   * Values or locks at one layer changed. Who that reaches follows from the
+   * layer: one person in one organisation, a whole organisation, or everyone.
+   */
+  'settings.changed':
+    | { layer: 'user'; organisationId: Types.ObjectId; userId: Types.ObjectId; keys: SettingKey[]; actorId: Types.ObjectId }
+    | { layer: 'organisation'; organisationId: Types.ObjectId; keys: SettingKey[]; actorId: Types.ObjectId }
+    | { layer: Extract<SettingLayer, 'platform'>; keys: SettingKey[]; actorId: Types.ObjectId };
 }
 
 export type EventName = keyof EventPayloads;

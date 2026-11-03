@@ -17,6 +17,8 @@ export const toLocationView = (location: LocationDoc): LocationView => ({
   letterhead: location.letterhead,
   isDefault: location.isDefault,
   status: location.status,
+  province: location.province ?? null,
+  city: location.city ?? null,
 });
 
 export const listLocations = async (scope: Scope, query: ListLocationsQuery): Promise<LocationView[]> => {
@@ -66,6 +68,8 @@ export const updateLocation = async (scope: Scope, id: string, patch: UpdateLoca
   if (patch.timings !== undefined) location.timings = patch.timings;
   if (patch.letterhead !== undefined) location.letterhead = patch.letterhead;
   if (patch.isDefault !== undefined) location.isDefault = patch.isDefault;
+  if (patch.province !== undefined) location.province = patch.province;
+  if (patch.city !== undefined) location.city = patch.city;
 
   await location.save();
   if (location.isDefault) {

@@ -3,7 +3,7 @@ import type { Request, RequestHandler } from 'express';
 import { Location, Membership, Practice } from '../../models';
 import { AppError } from '../errors';
 import catchAsync from '../../utils/catchAsync';
-import type { Role } from '../../shared/roles';
+import { organisationTypeSchema, type OrganisationType, type Role } from '../../shared/roles';
 import type { Scope } from '../db';
 
 const PRACTICE_HEADER = 'x-practice-id';
@@ -23,6 +23,12 @@ const asObjectId = (value: string, header: string): Types.ObjectId => {
 export const allowedLocationsFor = (role: Role, locationIds: Types.ObjectId[]): Types.ObjectId[] | 'all' =>
   role === 'doctor' ? 'all' : locationIds;
 
+/** Where the clinic routes may be used: everything that is not about settings, today. */
+export const CLINIC_ONLY: readonly OrganisationType[] = ['clinic'];
+
+/** Every kind of organisation, for the routes any member of any of them may use. */
+export const ANY_ORGANISATION: readonly OrganisationType[] = organisationTypeSchema.options;
+
 /**
  * What this person may do in this practice, with every check resolvePractice
  * makes and no Express: the realtime handshake runs exactly these.
@@ -30,8 +36,16 @@ export const allowedLocationsFor = (role: Role, locationIds: Types.ObjectId[]): 
  * Membership is looked up every time rather than carried in the token, so
  * removing a PA takes effect immediately instead of whenever their access
  * token happens to expire.
+ *
+ * `allowed` is the kinds of organisation the route serves. A member of any
+ * other kind is FORBIDDEN, after the membership checks, so a stranger still
+ * learns nothing about an organisation that is not theirs.
  */
-export const practiceContextFor = async (userId: Types.ObjectId, practiceText: string): Promise<Express.PracticeContext> => {
+export const practiceContextFor = async (
+  userId: Types.ObjectId,
+  practiceText: string,
+  allowed: readonly OrganisationType[] = CLINIC_ONLY,
+): Promise<Express.PracticeContext> => {
   const practiceId = asObjectId(practiceText, 'X-Practice-Id');
 
   const membership = await Membership.findOne({ practiceId, userId });
@@ -54,8 +68,18 @@ export const practiceContextFor = async (userId: Types.ObjectId, practiceText: s
     throw AppError.notFound('Clinic');
   }
 
+  if (!allowed.includes(practice.type)) {
+    throw new AppError(
+      'FORBIDDEN',
+      allowed.length === 1 && allowed[0] === 'clinic'
+        ? 'This is only available in a clinic.'
+        : 'This is not available here.',
+    );
+  }
+
   return {
     practiceId,
+    organisationType: practice.type,
     membershipId: membership._id,
     actorId: userId,
     role: membership.role,
@@ -64,22 +88,33 @@ export const practiceContextFor = async (userId: Types.ObjectId, practiceText: s
 };
 
 /**
- * Which practice this request is about, from X-Practice-Id. Required on
- * everything except /auth and /me.
+ * Which organisation this request is about, from X-Practice-Id, for a route
+ * that serves these kinds of organisation. The one place the kind is checked:
+ * a route says which kinds it serves by which of these it mounts, never by
+ * checking for itself.
  */
-export const resolvePractice: RequestHandler = catchAsync(async (req, _res, next) => {
-  if (!req.auth) {
-    throw new AppError('UNAUTHENTICATED', 'Please authenticate');
-  }
+export const resolveOrganisation = (allowed: readonly OrganisationType[]): RequestHandler =>
+  catchAsync(async (req, _res, next) => {
+    if (!req.auth) {
+      throw new AppError('UNAUTHENTICATED', 'Please authenticate');
+    }
 
-  const header = req.get(PRACTICE_HEADER);
-  if (!header) {
-    throw new AppError('PRACTICE_REQUIRED', 'X-Practice-Id is required');
-  }
+    const header = req.get(PRACTICE_HEADER);
+    if (!header) {
+      throw new AppError('PRACTICE_REQUIRED', 'X-Practice-Id is required');
+    }
 
-  req.ctx = await practiceContextFor(req.auth.userId, header);
-  next();
-});
+    req.ctx = await practiceContextFor(req.auth.userId, header, allowed);
+    next();
+  });
+
+/**
+ * Which clinic this request is about, from X-Practice-Id. Required on
+ * everything except /auth and /me, and what every clinic route mounts, so a
+ * platform member who sends the platform's id is FORBIDDEN from all of them
+ * without any route saying so.
+ */
+export const resolvePractice: RequestHandler = resolveOrganisation(CLINIC_ONLY);
 
 /**
  * The location an id names if this caller may use it, or why they may not.
@@ -190,6 +225,7 @@ export default {
   allowedLocationsFor,
   practiceContextFor,
   checkLocation,
+  resolveOrganisation,
   resolvePractice,
   resolveLocation,
   resolveLocationIfSent,

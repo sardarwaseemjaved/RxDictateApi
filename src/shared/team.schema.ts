@@ -20,14 +20,15 @@ export type MemberView = z.infer<typeof memberViewSchema>;
 export const addMemberBodySchema = z.object({
   phone: phoneSchema,
   name: z.string().trim().min(1).max(120).optional(),
-  role: roleSchema.exclude(['patient']).default('pa'),
+  /** A clinic's two working roles. The others belong to other kinds of organisation, or to nobody yet. */
+  role: roleSchema.extract(['doctor', 'pa']).default('pa'),
   locationIds: z.array(objectIdSchema).min(1),
 });
 export type AddMemberBody = z.infer<typeof addMemberBodySchema>;
 
 export const updateMemberBodySchema = z
   .object({
-    role: roleSchema.exclude(['patient']).optional(),
+    role: roleSchema.extract(['doctor', 'pa']).optional(),
     locationIds: z.array(objectIdSchema).min(1).optional(),
     name: z.string().trim().min(1).max(120).optional(),
   })

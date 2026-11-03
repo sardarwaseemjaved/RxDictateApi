@@ -21,6 +21,7 @@ export { Appointment, type IAppointment, type AppointmentDoc } from './appointme
 export { Device, type IDevice, type DeviceDoc } from './device.model';
 export { Session, type ISession, type SessionDoc, type SessionRevokedReason } from './session.model';
 export { Counter, type ICounter, type CounterDoc } from './counter.model';
+export { Setting, type ISetting, type SettingDoc } from './setting.model';
 
 /* eslint-disable import/first */
 import { Practice } from './practice.model';
@@ -44,6 +45,7 @@ import { Appointment } from './appointment.model';
 import { Device } from './device.model';
 import { Session } from './session.model';
 import { Counter } from './counter.model';
+import { Setting } from './setting.model';
 
 /**
  * Every collection, including the ones no route touches yet.
@@ -73,6 +75,7 @@ export const allModels = [
   Device,
   Session,
   Counter,
+  Setting,
 ];
 
 /**

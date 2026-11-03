@@ -1,5 +1,6 @@
 import request from 'supertest';
 import app from '../../src/app';
+import { initPlatform } from '../../src/services/organisation.service';
 
 export interface SignedIn {
   userId: string;
@@ -108,6 +109,16 @@ export const aPa = async (doctor: SignedIn, phone: string, locationIds?: string[
 
   const pa = await signIn(phone);
   return pa;
+};
+
+/**
+ * A platform admin, made the way the first one is - by platform:init - then
+ * signed in. Their only membership is the platform's, so `practiceId` is the
+ * platform organisation and there is no location.
+ */
+export const aPlatformAdmin = async (phone: string): Promise<SignedIn> => {
+  await initPlatform(phone, 'Platform Admin');
+  return signIn(phone);
 };
 
 /** A draft prescription for a patient, owned by the doctor. */

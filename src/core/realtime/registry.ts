@@ -102,5 +102,8 @@ export const onSession = (sessionId: string): Connection[] => bySession.get(sess
 
 export const inPractice = (practiceId: string): Connection[] => byPractice.get(practiceId);
 
+/** Every signed-in socket in this process. */
+export const everyConnection = (): Connection[] => [...bySocket.values()];
+
 /** The connection a socket signed in as, or undefined while it has not. */
 export const connectionOf = (socket: WebSocket): Connection | undefined => bySocket.get(socket);

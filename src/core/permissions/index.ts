@@ -13,6 +13,14 @@ import { AppError } from '../errors';
  * doctor may use any location of their own practice and a PA only the ones
  * they were assigned, and resolveLocation enforces that for every
  * location-scoped route.
+ *
+ * Neither is the kind of organisation, though it follows from the role: each
+ * role belongs to one organisation type (ROLES_BY_ORGANISATION_TYPE), so a
+ * platform right can only come from a platform membership. The clinic routes
+ * also refuse any other kind of organisation in the tenancy middleware.
+ *
+ * GET /me hands each membership its row of this table as `can`, so the apps
+ * hide exactly what this would refuse.
  */
 const PERMISSIONS: Record<Action, readonly Role[]> = {
   // The practice and its locations are the doctor's to configure. A PA gets the
@@ -72,6 +80,13 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'appointment.cancel': ['doctor', 'pa'],
 
   'notification.read': ['doctor', 'pa'],
+
+  // Everybody who works somewhere reads what applies to them and sets their
+  // own, where the registry lets a person choose. Not a patient, who holds
+  // nothing until the portal exists.
+  'settings.read': ['doctor', 'pa', 'platformAdmin', 'reviewer', 'contentManager'],
+  'settings.organisation.update': ['doctor'],
+  'settings.platform.update': ['platformAdmin'],
 };
 
 export const can = (role: Role, action: Action): boolean => PERMISSIONS[action].includes(role);
@@ -90,7 +105,7 @@ export const requireCan =
       return next(new AppError('PRACTICE_REQUIRED', 'This route needs a practice'));
     }
     if (!can(req.ctx.role, action)) {
-      return next(new AppError('FORBIDDEN', `A ${req.ctx.role} cannot ${action.replace('.', ' ')}`));
+      return next(new AppError('FORBIDDEN', `A ${req.ctx.role} cannot ${action.replace(/\./g, ' ')}`));
     }
     return next();
   };

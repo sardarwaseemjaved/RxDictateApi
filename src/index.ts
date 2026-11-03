@@ -9,6 +9,7 @@ import { markExpiredSessions } from './services/session.service';
 import { backfillQueuePositions } from './services/visit.service';
 import { backfillPatientLocations } from './services/patient.service';
 import { backfillVerificationCodes } from './services/verify.service';
+import { backfillOrganisationTypes } from './services/organisation.service';
 import { attachRealtime, type RealtimeServer } from './core/realtime';
 
 let server: Server | undefined;
@@ -57,6 +58,12 @@ const start = async (): Promise<void> => {
   // Every collection and index exists from the first boot, including the ones
   // no route touches yet.
   await syncCollections();
+
+  // Every practice made before organisations had types is a clinic.
+  const typed = await backfillOrganisationTypes();
+  if (typed > 0) {
+    logger.info(`marked ${typed} practice(s) as clinics`);
+  }
 
   // Before the first request, so no list is ever read without its order.
   const backfilled = await backfillQueuePositions();

@@ -1,5 +1,6 @@
 import mongoose, { Schema, type HydratedDocument } from 'mongoose';
 import { paginate, toJSON, type PaginateModel } from './plugins';
+import { SPECIALTIES, type Specialty } from '../shared/specialties';
 
 /**
  * A person, identified by their phone number and nothing else: there is no
@@ -13,6 +14,8 @@ export interface IUser {
   /** E.164, e.g. +923001234567. */
   phone: string;
   name: string;
+  /** What a doctor practises. On the person, not a membership, so it is the same in every clinic. */
+  specialties: Specialty[];
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -24,6 +27,7 @@ const userSchema = new Schema<IUser>(
   {
     phone: { type: String, required: true, trim: true },
     name: { type: String, default: '', trim: true },
+    specialties: { type: [{ type: String, enum: SPECIALTIES }], default: [] },
     lastLoginAt: { type: Date, default: null },
   },
   { timestamps: true },

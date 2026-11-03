@@ -5,6 +5,7 @@ import logger from '../config/logger';
 import { Location, Membership, OtpCode, Practice, User, type LocationDoc, type UserDoc } from '../models';
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
+import { actionsFor } from '../core/permissions';
 import { sendOtp as sendOtpSms } from '../core/sms';
 import type { AuthIntent, DeviceInfo, MembershipView, Session, TokenPair } from '../shared/auth.schema';
 import { addMinutes } from '../utils/time';
@@ -187,7 +188,9 @@ export const membershipViews = async (userId: Types.ObjectId): Promise<Membershi
         id: String(membership._id),
         practiceId: String(membership.practiceId),
         practiceName: practice?.name ?? '',
+        organisationType: practice?.type ?? 'clinic',
         role: membership.role,
+        can: actionsFor(membership.role),
         locationIds: locations.map((location) => String(location._id)),
         locations: locations.map((location) => ({
           id: String(location._id),

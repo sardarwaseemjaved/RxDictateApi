@@ -5,7 +5,7 @@ import type { RealtimeServerMessage } from '../../shared/realtime.schema';
 import type { Role } from '../../shared/roles';
 import { canSeePatient } from '../../services/patient.service';
 import { allowedLocationsFor } from '../tenancy';
-import { inPractice, ofMember, onLocation, onSession, unregister, type Connection } from './registry';
+import { everyConnection, inPractice, ofMember, onLocation, onSession, unregister, type Connection } from './registry';
 
 /** The WebSocket close code for every close that comes with an error message: 1008, policy violation. */
 export const CLOSE_POLICY = 1008;
@@ -17,13 +17,17 @@ export const CLOSE_POLICY = 1008;
  * `patient` is whoever may see a patient linked to these locations, by the
  * same rule the patient routes use (canSeePatient): every doctor, and the
  * assistants at one of those locations.
+ *
+ * `all` is every open socket, for what applies to everyone, like a
+ * platform-wide setting.
  */
 export type Audience =
   | { to: 'location'; locationId: string }
   | { to: 'member'; practiceId: string; userId: string }
   | { to: 'session'; sessionId: string }
   | { to: 'practice'; practiceId: string }
-  | { to: 'patient'; practiceId: string; linkedTo: string[] };
+  | { to: 'patient'; practiceId: string; linkedTo: string[] }
+  | { to: 'all' };
 
 /**
  * Everything a write can do to open connections.
@@ -78,6 +82,8 @@ const audienceOf = (audience: Audience): Connection[] => {
       const linkedTo = audience.linkedTo.map((id) => new Types.ObjectId(id));
       return inPractice(audience.practiceId).filter((connection) => canSeePatient(connection.allowedLocationIds, linkedTo));
     }
+    case 'all':
+      return everyConnection();
     default:
       return [];
   }
