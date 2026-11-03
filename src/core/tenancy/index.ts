@@ -18,10 +18,10 @@ const asObjectId = (value: string, header: string): Types.ObjectId => {
 
 /**
  * Which locations a member may use: any location of their own practice for a
- * doctor, and for a PA the ones they were assigned.
+ * doctor or a medicine manager, and for a PA the ones they were assigned.
  */
 export const allowedLocationsFor = (role: Role, locationIds: Types.ObjectId[]): Types.ObjectId[] | 'all' =>
-  role === 'doctor' ? 'all' : locationIds;
+  role === 'doctor' || role === 'medicineManager' ? 'all' : locationIds;
 
 /** Where the clinic routes may be used: everything that is not about settings, today. */
 export const CLINIC_ONLY: readonly OrganisationType[] = ['clinic'];

@@ -18,6 +18,7 @@ import { audioKey, extensionFor, get as getObject, put, remove, signedGetUrl } f
 import type { AddSegmentBody, SegmentView, SignedUrlView, VoiceSessionView } from '../shared/voice.schema';
 import { applyOps, wireSections } from './prescriptionOps.service';
 import { extractOps } from './llm.service';
+import { namesOnDoctorsList } from './drugList.service';
 import { transcribe } from './stt.service';
 
 const sessions = new BaseRepository<IVoiceSession>(VoiceSession, { locationScoped: true });
@@ -165,8 +166,12 @@ const runSegment = async (session: VoiceSessionDoc, segmentId: Types.ObjectId): 
 
   const transcription = await transcribe(audio, contentType, {
     // A brand name is the word a general model gets wrong and the word that
-    // has to be right, so what is already on the draft is given to it.
-    drugNames: sections.medicines.map((medicine) => medicine.name),
+    // has to be right, so what is already on the draft is given to it, then
+    // what is on this doctor's list, since those are the words they say.
+    drugNames: [
+      ...sections.medicines.map((medicine) => medicine.name),
+      ...(await namesOnDoctorsList(prescription.practiceId, prescription.doctorId)),
+    ],
     durationMs: segment.audio.durationMs,
   });
   segment.transcript = transcription.transcript;

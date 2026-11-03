@@ -1,4 +1,4 @@
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import { ACTIONS, type Action, type Role } from '../../shared/roles';
 import { AppError } from '../errors';
 
@@ -61,7 +61,12 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'voice.dictate': ['doctor'],
   'voice.read': ['doctor'],
 
-  'drug.search': ['doctor'],
+  // A medicine manager looks after the clinic's list and sees nothing else: no
+  // patients, no visits, no prescriptions.
+  'drug.search': ['doctor', 'medicineManager'],
+  'drugList.read': ['doctor', 'medicineManager'],
+  'drugList.own.manage': ['doctor'],
+  'drugList.clinic.manage': ['doctor', 'medicineManager'],
 
   // A template is one doctor's prescribing habit, kept for that doctor.
   'template.read': ['doctor'],
@@ -84,7 +89,7 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   // Everybody who works somewhere reads what applies to them and sets their
   // own, where the registry lets a person choose. Not a patient, who holds
   // nothing until the portal exists.
-  'settings.read': ['doctor', 'pa', 'platformAdmin', 'reviewer', 'contentManager'],
+  'settings.read': ['doctor', 'pa', 'medicineManager', 'platformAdmin', 'reviewer', 'contentManager'],
   'settings.organisation.update': ['doctor'],
   'settings.platform.update': ['platformAdmin'],
 };
@@ -110,4 +115,31 @@ export const requireCan =
     return next();
   };
 
-export default { can, actionsFor, requireCan };
+/**
+ * For a route where which action applies depends on the request: which list,
+ * or which kind of item. Mounted after validate when it reads the body.
+ */
+export const requireCanFor =
+  (actionOf: (req: Request) => Action): RequestHandler =>
+  (req, res, next) =>
+    requireCan(actionOf(req))(req, res, next);
+
+/**
+ * For a route where each thing asked for has its own action, and the service
+ * checks them one by one. Turns away whoever holds none of them before the
+ * body is parsed.
+ */
+export const requireCanAny =
+  (actions: readonly Action[]): RequestHandler =>
+  (req, _res, next) => {
+    if (!req.ctx) {
+      return next(new AppError('PRACTICE_REQUIRED', 'This route needs a practice'));
+    }
+    const { role } = req.ctx;
+    if (!actions.some((action) => can(role, action))) {
+      return next(new AppError('FORBIDDEN', `A ${role} cannot do this`));
+    }
+    return next();
+  };
+
+export default { can, actionsFor, requireCan, requireCanFor, requireCanAny };

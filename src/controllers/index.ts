@@ -1,6 +1,7 @@
 export * as appointmentController from './appointment.controller';
 export * as authController from './auth.controller';
 export * as drugController from './drug.controller';
+export * as drugListController from './drugList.controller';
 export * as locationController from './location.controller';
 export * as meController from './me.controller';
 export * as notificationController from './notification.controller';

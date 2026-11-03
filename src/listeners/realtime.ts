@@ -138,6 +138,15 @@ on('settings.changed', (change) => {
   }
 });
 
+/* Medicines, to whoever the changed list or item belongs to. */
+on('medicines.changed', (change) => {
+  tell(
+    change.owner === 'clinic' ? everyone(change.practiceId) : member(change.practiceId, change.doctorId),
+    'medicines',
+    change.drugId,
+  );
+});
+
 /* A session that ended takes its sockets with it. */
 on('session.revoked', ({ sessionId }) => {
   shut(

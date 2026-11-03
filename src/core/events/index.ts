@@ -164,6 +164,19 @@ export interface EventPayloads {
     | { layer: 'user'; organisationId: Types.ObjectId; userId: Types.ObjectId; keys: SettingKey[]; actorId: Types.ObjectId }
     | { layer: 'organisation'; organisationId: Types.ObjectId; keys: SettingKey[]; actorId: Types.ObjectId }
     | { layer: Extract<SettingLayer, 'platform'>; keys: SettingKey[]; actorId: Types.ObjectId };
+  /**
+   * A list or an own item changed. A clinic's reaches everyone in the clinic,
+   * and a doctor's own reaches that doctor. `drugId` is what changed.
+   */
+  'medicines.changed':
+    | { owner: 'clinic'; practiceId: Types.ObjectId; drugId: Types.ObjectId; actorId: Types.ObjectId }
+    | {
+        owner: 'doctor';
+        practiceId: Types.ObjectId;
+        doctorId: Types.ObjectId;
+        drugId: Types.ObjectId;
+        actorId: Types.ObjectId;
+      };
 }
 
 export type EventName = keyof EventPayloads;

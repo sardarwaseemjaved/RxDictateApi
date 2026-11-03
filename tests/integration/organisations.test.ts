@@ -135,6 +135,7 @@ describe('Organisation types', () => {
         ['get', '/api/v1/prescriptions'],
         ['post', '/api/v1/prescriptions'],
         ['get', '/api/v1/drugs?q=panadol'],
+        ['get', '/api/v1/drug-lists/me'],
         ['get', '/api/v1/appointments?from=2026-11-01&to=2026-11-30'],
         ['get', '/api/v1/follow-ups'],
         ['get', '/api/v1/notifications'],

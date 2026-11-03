@@ -215,6 +215,24 @@ the phone that admin signs in with. Running it again changes nothing:
 cd /srv/clinic-api && node dist/scripts/platformInit.js --phone +923001234567
 ```
 
+Once, on a server that was running before medicines had scopes, straight after
+that release: what was typed becomes each doctor's own. Until it runs, those rows
+aren't suggested to anyone. `--dry-run` shows what it would do, and running it
+again changes nothing:
+
+```sh
+cd /srv/clinic-api && node dist/scripts/drugsMigrateTyped.js
+```
+
+Then load the national catalog from DRAP's list, which you copy to the server.
+Run it again whenever there's a new list; add `--dry-run` to see what it would do
+first, and `--discontinue-missing` to retire what the new list leaves out. The
+columns are in the main README, under **Medicines**:
+
+```sh
+cd /srv/clinic-api && node dist/scripts/drugsImport.js /path/to/drap.csv
+```
+
 ### 6. Start on boot, rotate logs
 
 On the server, run this. It prints a `sudo ...` command; run that too:

@@ -492,10 +492,12 @@ paths:
   /settings/organisation:
     patch:
       tags: [Settings]
-      summary: Set, lock or take away the clinic's values (doctor)
+      summary: Set, lock or take away the clinic's values (by key)
       description: |
-        Permission settings.organisation.update: a clinic's doctor. Body { values: [{ key, value,
-        locked? }] }. locked: true stops the people in the clinic changing it, on a key the registry
+        Each key names the action that sets it (organisationAction in the registry, otherwise
+        settings.organisation.update), and one key the caller may not set refuses the whole patch with
+        FORBIDDEN: medicines.source is drugList.clinic.manage, so a medicine manager can set that and
+        nothing else. Body { values: [{ key, value, locked? }] }. locked: true stops the people in the clinic changing it, on a key the registry
         marks lockable; leaving locked out keeps the lock as it was. value null takes the clinic's value
         and its lock away. Refused as for /settings/me, plus a lock on a key that is not lockable, and
         a key RxDictate has locked ("is locked by RxDictate"). Sends settings to everyone in the clinic.
@@ -524,6 +526,142 @@ paths:
         '200': { description: Every setting, as it now applies to the caller }
         '400': { description: VALIDATION_ERROR }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /drugs:
+    get:
+      tags: [Medicines]
+      summary: Suggestions, by the caller's medicines.source (doctor, medicine manager)
+      description: |
+        The server applies the caller's effective medicines.source; the app only sends what was typed.
+        myList searches the doctor's list and the clinic's, what they have used first. myListFirst
+        searches everything: the doctor's list, then the clinic's, then the rest. all searches every
+        active national medicine and the clinic's items: the doctor's list, then their use, then the
+        clinic's, then the rest. Inside a tier, a name (brand, composition or alias) that starts with q
+        comes before one with a later word starting with it, then the doctor's usage, then the alphabet.
+        Never another clinic's items, another doctor's typed rows, or anything that isn't active, and
+        nothing paid or promoted, ever.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, required: true, schema: { type: string, minLength: 1, maxLength: 120 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+        - in: query
+          name: everywhere
+          description: Search as all for this one request. Never changes the setting.
+          schema: { type: string, enum: ['true', 'false'], default: 'false' }
+      responses:
+        '200': { description: A list of DrugSuggestion, which is DrugView plus inMyList, inClinicList and usual }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Medicines]
+      summary: Add a medicine for the clinic's list or the doctor's own
+      description: |
+        Body createDrugBodySchema. for clinic makes a clinic row on the clinic's list, and needs
+        drugList.clinic.manage. for me makes a doctor row (typed, unverified) on the doctor's own list,
+        and needs drugList.own.manage. An exact duplicate the caller can already see, ignoring case and
+        spacing, is reused and put on that list, and answers 200. Sends medicines.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example:
+              { brand: Local Syrup, generic: Honey, strength: 5ml, form: syp, pack: 100ml, company: House, for: clinic }
+      responses:
+        '201': { description: Made. A DrugListItemView }
+        '200': { description: An existing medicine was reused. A DrugListItemView }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /drugs/{id}:
+    patch:
+      tags: [Medicines]
+      summary: Correct a clinic's item or a doctor's own row
+      description: |
+        Body updateDrugBodySchema; only what is sent changes. A clinic row may be corrected by anyone
+        with drugList.clinic.manage, and a doctor row only by its doctor. A national row is FORBIDDEN:
+        the catalog comes from the import. Correcting a row into one the owner already has is CONFLICT.
+        Sends medicines.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The medicine (DrugView) }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: NOT_FOUND, including a row the caller cannot see }
+        '409': { description: CONFLICT }
+
+  /drug-lists/{owner}:
+    parameters:
+      - in: path
+        name: owner
+        required: true
+        description: me, the caller's own list in this clinic, or clinic. No route names another doctor's list.
+        schema: { type: string, enum: [me, clinic] }
+    get:
+      tags: [Medicines]
+      summary: A page of a list, by brand (doctor, medicine manager)
+      description: Permission drugList.read. A discontinued drug stays listed, shown as discontinued, so its owner can take it off.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A page of DrugListItemView: { drug, usual, addedAt }, with paging in meta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /drug-lists/{owner}/items/{drugId}:
+    parameters:
+      - { in: path, name: owner, required: true, schema: { type: string, enum: [me, clinic] } }
+      - { in: path, name: drugId, required: true, schema: { type: string } }
+    put:
+      tags: [Medicines]
+      summary: Add a drug to a list, or update its usual
+      description: |
+        me needs drugList.own.manage and clinic needs drugList.clinic.manage. Body { usual? }: leaving
+        it out keeps what is there, null takes it away, and a usual keeps only what was sent. Sending it
+        twice changes nothing and writes nothing. May go on a list: an active national drug, the clinic's
+        own items, and on a doctor's own list their own typed rows. Sends medicines.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example: { usual: { pattern: { m: 1, a: 0, n: 1 }, timing: after_meal, durationDays: 5 } }
+      responses:
+        '200': { description: The item (DrugListItemView) }
+        '400': { description: VALIDATION_ERROR, for a discontinued drug or a doctor's own row on the clinic's list }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: NOT_FOUND, including a row the caller cannot see }
+    delete:
+      tags: [Medicines]
+      summary: Take a drug off a list
+      description: The same permissions as PUT. Taking off what is not there writes nothing. The drug stays in the catalog.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '200': { description: '{ removed: boolean }' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /members:
+    post:
+      tags: [Team]
+      summary: Add a member by phone number (doctor)
+      description: |
+        Body addMemberBodySchema. role is doctor, pa (the default) or medicineManager. locationIds is
+        required, except for a medicine manager, who reaches every location like a doctor and holds only
+        the medicine actions. A medicine manager's role never changes: PATCH /members/{id} refuses it.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: The member (memberViewSchema) }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: ALREADY_MEMBER }
 
   /verify/{code}:
     parameters:

@@ -1,0 +1,11 @@
+registrationNo,brand,composition,strength,form,pack,company
+001234,Panadol,"Paracetamol 500mg",500mg,Tablet,10x10,GSK
+001235,Panadol Extra,"Paracetamol 500mg + Caffeine 65mg",500mg,Film Coated Tablet,10x10,GSK
+002001,Risek,"Omeprazole 20mg, delayed release",20mg,Capsule,14,Getz
+002002,Augmentin,"Co-Amoxiclav 625mg",625mg,Tablets,6,GSK
+003001,Calpol,"Paracetamol 120mg/5ml",120mg/5ml,Syrup,60ml,GSK
+003002,Ceftriax,"Ceftriaxone 1g",1g,Powder for Injection,1 vial,Sami
+003003,Skin Soother,"Calamine 8%",8%,Lotion,100ml,Herbion
+,No Number,"Nothing",1mg,Tablet,10,Nobody
+004001,,"No brand here",1mg,Tablet,10,Nobody
+001234,Panadol Twice,"Paracetamol 500mg",500mg,Tablet,10x10,GSK

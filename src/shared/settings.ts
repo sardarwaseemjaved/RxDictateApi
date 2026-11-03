@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Action } from './roles';
 
 /**
  * Every setting, in one registry, set at up to three layers:
@@ -29,6 +30,8 @@ export interface SettingDefinition<T extends z.ZodType = z.ZodType> {
   setBy: readonly SettingLayer[];
   /** Whether a layer that sets it may also stop the layers below from changing it. */
   lockable: boolean;
+  /** The action that sets it at the organisation layer, when it is not `settings.organisation.update`. */
+  organisationAction?: Action;
 }
 
 /** Only here so each entry's default is checked against its own schema. */
@@ -46,6 +49,7 @@ export const SETTINGS = {
     default: 'myListFirst',
     setBy: ['platform', 'organisation', 'user'],
     lockable: true,
+    organisationAction: 'drugList.clinic.manage',
   }),
 };
 
@@ -59,6 +63,15 @@ export const isSettingKey = (key: string): key is SettingKey => Object.prototype
 
 /** The registry entry for a key, without the per-key types. */
 export const definitionOf = (key: SettingKey): SettingDefinition => SETTINGS[key];
+
+/** Who may set this key for a clinic. */
+export const organisationActionOf = (key: SettingKey): Action =>
+  definitionOf(key).organisationAction ?? 'settings.organisation.update';
+
+/** Every action that sets something for a clinic: holding none of them, a member can set nothing there. */
+export const ORGANISATION_SETTING_ACTIONS: readonly Action[] = [
+  ...new Set<Action>(['settings.organisation.update', ...SETTING_KEYS.map(organisationActionOf)]),
+];
 
 /** One setting as it applies to the caller. */
 export interface EffectiveSetting<K extends SettingKey> {

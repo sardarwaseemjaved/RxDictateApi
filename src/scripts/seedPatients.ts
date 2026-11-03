@@ -26,6 +26,7 @@ import logger from '../config/logger';
 import { Location, Membership, Patient, Practice, User } from '../models';
 import type { Scope } from '../core/db';
 import { can } from '../core/permissions';
+import { allowedLocationsFor } from '../core/tenancy';
 import { createPatientBodySchema, type CreatePatientBody } from '../shared/patient.schema';
 import { createVisitBodySchema } from '../shared/visit.schema';
 import { createPatient } from '../services/patient.service';
@@ -150,7 +151,7 @@ const run = async (): Promise<void> => {
     practiceId: clinic._id,
     actorId: user._id,
     role: membership.role,
-    allowedLocationIds: membership.role === 'doctor' ? 'all' : membership.locationIds,
+    allowedLocationIds: allowedLocationsFor(membership.role, membership.locationIds),
   };
 
   if (today && !location) {

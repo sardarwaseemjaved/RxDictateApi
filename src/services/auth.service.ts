@@ -7,6 +7,7 @@ import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { actionsFor } from '../core/permissions';
 import { sendOtp as sendOtpSms } from '../core/sms';
+import { allowedLocationsFor } from '../core/tenancy';
 import type { AuthIntent, DeviceInfo, MembershipView, Session, TokenPair } from '../shared/auth.schema';
 import { addMinutes } from '../utils/time';
 import { forgetDevice, identifySession, revokeSession, rotateSession, startSession } from './session.service';
@@ -177,10 +178,10 @@ export const membershipViews = async (userId: Types.ObjectId): Promise<Membershi
   return Promise.all(
     memberships.map(async (membership) => {
       const practice = await Practice.findById(membership.practiceId);
-      // A doctor may use any location of his practice, so his list is every
-      // active one rather than whatever happens to be on the membership.
+      // A doctor or a medicine manager may use any location of the practice, so
+      // their list is every active one rather than whatever is on the membership.
       const locations: LocationDoc[] =
-        membership.role === 'doctor'
+        allowedLocationsFor(membership.role, membership.locationIds) === 'all'
           ? await Location.find({ practiceId: membership.practiceId, deletedAt: null })
           : await Location.find({ _id: { $in: membership.locationIds }, deletedAt: null });
 
@@ -261,7 +262,7 @@ export const verifyOtp = async (
           practiceId: membership.practiceId,
           actorId: user!._id,
           role: membership.role,
-          allowedLocationIds: membership.role === 'doctor' ? 'all' : membership.locationIds,
+          allowedLocationIds: allowedLocationsFor(membership.role, membership.locationIds),
         },
         { action: 'auth.signIn', entity: 'user', entityId: user!._id },
       ),
@@ -330,7 +331,7 @@ export const logout = async (
           practiceId: membership.practiceId,
           actorId: session.userId,
           role: membership.role,
-          allowedLocationIds: membership.role === 'doctor' ? 'all' : membership.locationIds,
+          allowedLocationIds: allowedLocationsFor(membership.role, membership.locationIds),
         },
         {
           action: 'auth.logout',

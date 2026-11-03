@@ -4,7 +4,8 @@ import { settingsValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
 import { ANY_ORGANISATION, resolveOrganisation } from '../../core/tenancy';
-import { requireCan } from '../../core/permissions';
+import { requireCan, requireCanAny } from '../../core/permissions';
+import { ORGANISATION_SETTING_ACTIONS } from '../../shared/settings';
 
 const router = express.Router();
 
@@ -34,11 +35,12 @@ router.patch(
   settingsController.updateMySettings,
 );
 
+// Each key names the action that sets it, so the service checks them one by one.
 router.patch(
   '/organisation',
   requireAuth,
   resolveOrganisation(ANY_ORGANISATION),
-  requireCan('settings.organisation.update'),
+  requireCanAny(ORGANISATION_SETTING_ACTIONS),
   validate(settingsValidation.updateOrganisationSettings),
   settingsController.updateOrganisationSettings,
 );

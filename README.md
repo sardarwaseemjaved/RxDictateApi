@@ -11,6 +11,7 @@ Three actors:
 
 - **doctor** — writes, approves, dictates, manages locations and staff
 - **PA (assistant)** — adds patients to today's list, prints approved prescriptions
+- **medicine manager** — keeps the clinic's list of medicines, and nothing else
 - **patient** — later, read-only
 
 Built for one doctor today. Every record is scoped to a _practice_, so the same
@@ -67,6 +68,8 @@ yarn docker:test
 
 yarn platform:init --phone +923001234567   # the platform organisation and its first admin
 yarn seed:patients --phone … --clinic …     # made-up patients for trying the apps
+yarn drugs:import <file.csv>                # the national catalog, from a DRAP file
+yarn drugs:migrate-typed                    # once: what was typed becomes each doctor's own
 ```
 
 Deploying to a server: [deploy/README.md](deploy/README.md).
@@ -163,7 +166,7 @@ src/
     storage/       S3/R2 and local drivers, signed URLs
     sms/           provider adapter
   config/          zod-validated env, winston, morgan
-  models/          the 22 collections, their indexes, and syncCollections()
+  models/          the 24 collections, their indexes, and syncCollections()
   services/        the work
   controllers/     thin: call a service, send the envelope
   routes/v1/       every route, with its middleware chain spelled out
@@ -244,13 +247,15 @@ which serves a member of any kind of organisation (see **Organisations**).
 | visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`, `POST /visits/:id/move`                                                                                                       | doctor, PA                        |
 | prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/preview`, `GET /prescriptions/:id/pdf` | doctor (PA: read + preview + pdf) |
 | voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                                                  | doctor                            |
-| drugs         | `GET /drugs?q=`                                                                                                                                                                              | doctor                            |
+| drugs         | `GET /drugs?q=&limit=&everywhere=` — see **Medicines**                                                                                                                                       | doctor, medicine manager          |
+| drugs         | `POST /drugs`, `PATCH /drugs/:id`                                                                                                                                                            | doctor, medicine manager          |
+| drug lists    | `GET /drug-lists/:owner`, `PUT`/`DELETE /drug-lists/:owner/items/:drugId`                                                                                                                    | doctor, medicine manager          |
 | history       | `GET /patients/:id/history?kind=`                                                                                                                                                            | doctor                            |
 | reports       | `POST /reports/uploads`, `POST`/`GET /patients/:id/reports`, `GET /reports/:id`                                                                                                              | doctor, PA                        |
 | reports       | `POST /reports/:id/review`                                                                                                                                                                   | doctor                            |
 | templates     | `GET`/`POST /templates`, `GET`/`PATCH`/`DELETE /templates/:id`, `POST /prescriptions/from-template/:id`                                                                                      | doctor                            |
 | settings      | `GET /settings`, `PATCH /settings/me` — see **Settings**                                                                                                                                     | anyone in any organisation        |
-| settings      | `PATCH /settings/organisation`                                                                                                                                                               | doctor                            |
+| settings      | `PATCH /settings/organisation`                                                                                                                                                               | by key: doctor, medicine manager  |
 | settings      | `PATCH /settings/platform`                                                                                                                                                                   | platform admin                    |
 | files         | `GET`/`PUT /files/<key>?…&sig=` — local storage driver only                                                                                                                                  | whoever holds the signed link     |
 | verify        | `GET /verify/:code`, `GET /verify/:code/qr.svg` — see **Verifying a printout**                                                                                                               | anyone, 30 a minute per address   |
@@ -510,6 +515,13 @@ anyone does, and `/me` lists the platform beside any clinic they work at.
 | read settings, set their own                      | yes                            | yes                     |
 | set and lock the clinic's settings                | yes                            | no                      |
 
+A **medicine manager** holds four actions and nothing else: `drug.search`,
+`drugList.read`, `drugList.clinic.manage` and `settings.read`. No patients, no
+visits, no prescriptions, no inbox. Like a doctor they reach every location, so
+the apps' location handling needs no special case, and for the same reason they
+don't hear about those things over the realtime socket either: each topic names
+the action needed to hear it. A doctor also holds `drugList.own.manage`.
+
 The platform's roles hold none of a clinic's actions. Every one of them may read
 settings and set their own (`settings.read`), and only a `platformAdmin` may set
 and lock settings for everyone (`settings.platform.update`). The reserved
@@ -544,7 +556,15 @@ it:
 
 A new setting is one entry. It needs no route, and a settings screen can be
 drawn from the registry. `medicines.source` is the first, and the only one
-today. Nothing reads it until the medicines work.
+today. `GET /drugs` reads it: see **Medicines**.
+
+**Who sets it for a clinic.** An entry may name its `organisationAction`, the
+action that sets it at the organisation layer; otherwise that is
+`settings.organisation.update`. `medicines.source` names
+`drugList.clinic.manage`, so a medicine manager can set it without getting every
+clinic setting. `PATCH /settings/organisation` checks each key's action, and one
+key the caller may not set refuses the whole patch with `FORBIDDEN`. Someone who
+holds none of those actions is turned away before the body is read.
 
 **Layers.** `platform` (RxDictate, for everyone) → `organisation` (one clinic,
 for everyone in it) → `user` (one person, in one organisation). Someone who
@@ -565,12 +585,12 @@ stored value that the key's schema no longer accepts counts as unset.
 
 **Routes.** Each answers with the `GET /settings` shape for the caller.
 
-| Route                          | Who                                                | Body                                    |
-| ------------------------------ | -------------------------------------------------- | --------------------------------------- |
-| `GET /settings`                | anyone, for their active membership                | —                                       |
-| `PATCH /settings/me`           | anyone, for their own values                       | `{ values: [{ key, value }] }`          |
-| `PATCH /settings/organisation` | a clinic's doctor (`settings.organisation.update`) | `{ values: [{ key, value, locked? }] }` |
-| `PATCH /settings/platform`     | a platform admin (`settings.platform.update`)      | `{ values: [{ key, value, locked? }] }` |
+| Route                          | Who                                           | Body                                    |
+| ------------------------------ | --------------------------------------------- | --------------------------------------- |
+| `GET /settings`                | anyone, for their active membership           | —                                       |
+| `PATCH /settings/me`           | anyone, for their own values                  | `{ values: [{ key, value }] }`          |
+| `PATCH /settings/organisation` | whoever holds each key's action (below)       | `{ values: [{ key, value, locked? }] }` |
+| `PATCH /settings/platform`     | a platform admin (`settings.platform.update`) | `{ values: [{ key, value, locked? }] }` |
 
 - **What `GET /settings` returns.** Every key, as
   `{ value, source: 'default' | 'platform' | 'organisation' | 'user', locked }`.
@@ -618,6 +638,123 @@ place, so both are now structured:
   null. Both are nullable, set through the location routes, and returned in
   `locationViewSchema`. A `PATCH /locations/:id` changes only the fields it
   names.
+
+## Medicines
+
+**The catalog has three scopes.** Every row in `drugs` is one of these:
+
+| `scope`    | What it is                                                  | Seen by                     | `source`     |
+| ---------- | ----------------------------------------------------------- | --------------------------- | ------------ |
+| `national` | a registered product, from the DRAP import and nowhere else | every doctor                | `drapImport` |
+| `clinic`   | an item only this clinic has                                | that clinic                 | `clinic`     |
+| `doctor`   | a medicine a doctor added or typed, marked unverified       | that doctor, in that clinic | `typed`      |
+
+`status` is `active` or `discontinued` for now (`pending` and `rejected` are for
+the review queue), and `verified` is false only for `typed` rows. A national row
+is unique by `drapRegNo`, and a clinic or doctor row by its owner, brand, strength
+and form, ignoring case and spacing. Prescriptions keep their own copy of every
+line, so changing or discontinuing a row never changes a prescription.
+
+**The import.** The file comes from you; nothing here scrapes DRAP's website.
+
+```bash
+yarn drugs:import <file.csv> [--dry-run] [--discontinue-missing]
+```
+
+| Column           | Becomes                                                                                                                                 |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `registrationNo` | `drapRegNo`, the key. A row without one is skipped                                                                                      |
+| `brand`          | `brand`. A row without one is skipped                                                                                                   |
+| `composition`    | `generic`, as DRAP writes it: `Paracetamol 500mg + Caffeine 65mg`                                                                       |
+| `strength`       | `strength`                                                                                                                              |
+| `form`           | `form`, mapped onto ours by its words (`Film Coated Tablet` is `tab`, `Suspension for Injection` is `inj`); anything unknown is `other` |
+| `pack`           | `pack`, such as `10x10`                                                                                                                 |
+| `company`        | `company`                                                                                                                               |
+
+Safe to run twice: a new registration number is inserted, and a known one is
+updated, which brings back one that was discontinued. `--discontinue-missing`
+marks national rows that aren't in the file as `discontinued`; without it nothing
+is ever removed. A row skipped for having no brand still counts as being in the
+file, and a file with nothing usable in it is refused rather than read as every
+product having gone. `--dry-run` changes nothing. It ends with a summary:
+inserted, updated, discontinued, and skipped with the reason.
+
+**What was typed before.** `drugs` used to grow from typing, so one doctor's typo
+showed to everyone. Once, straight after the release that adds scopes:
+
+```bash
+yarn drugs:migrate-typed [--dry-run]
+```
+
+Each old row becomes a `doctor` row for each doctor who prescribed it in an
+approved prescription, in that clinic, on their list there, with usage worked out
+from those prescriptions. A prescription since superseded was approved, so it
+counts. A row nobody prescribed is dropped, and listed in the output. Prescriptions
+aren't touched. A draft line pointing at a dropped row is treated as typed when
+it's approved. Safe to run twice.
+
+**Lists.** One per owner: a doctor in a clinic, or the clinic. "My list" means the
+doctor's own and their clinic's, together. An item is a drug, when and by whom it
+was added, and an optional `usual` (`pattern`, `timing`, `durationDays`,
+`instructionEn`, `instructionUr`, the same shapes as a medicine line). A usual
+keeps only what was sent: a line's defaults would invent a dose nobody chose.
+
+| Route                                     | Who                                                              | What it does                                                                      |
+| ----------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `GET /drug-lists/:owner?q=&page=&limit=`  | `drugList.read`                                                  | a page of `DrugListItemView`, by brand. A discontinued drug stays, shown as such  |
+| `PUT /drug-lists/:owner/items/:drugId`    | `me`: `drugList.own.manage`; `clinic`: `drugList.clinic.manage`  | adds it or updates its usual; `usual: null` clears it. Twice changes nothing      |
+| `DELETE /drug-lists/:owner/items/:drugId` | the same                                                         | takes it off; `{ removed: false }` if it wasn't there                             |
+| `POST /drugs`                             | by `for`: `clinic` or `me`, the same                             | makes a `clinic` or `doctor` row on that list; an exact duplicate is reused (200) |
+| `PATCH /drugs/:id`                        | a clinic row: `drugList.clinic.manage`; a doctor row: its doctor | corrects it. National rows can't be edited (`FORBIDDEN`); a clash is `CONFLICT`   |
+
+`:owner` is `me` or `clinic`, and no route names another doctor's list. What may
+go on a list: an active national drug, the clinic's own items, and on a doctor's
+own list their own typed rows. Anything else the caller can see is
+`VALIDATION_ERROR`, and what they can't see is `NOT_FOUND`.
+
+**Suggestions.** `GET /drugs?q=&limit=&everywhere=` keeps its path, query and every
+field it returned, and each result is now a `DrugSuggestion`: a `DrugView` plus
+`inMyList`, `inClinicList` and `usual` (the doctor's own, otherwise the clinic's,
+otherwise null). The server applies the caller's effective `medicines.source`:
+
+| Mode                    | Searches                                                                  | Order                                                                      |
+| ----------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `myList`                | the doctor's list and the clinic's list                                   | what the doctor has used first                                             |
+| `myListFirst` (default) | everything                                                                | the doctor's list, then the clinic's, then the rest                        |
+| `all`                   | every active national drug and the clinic's items, plus the doctor's list | the doctor's list, then the doctor's use, then the clinic's, then the rest |
+
+Inside a tier, a name that starts with what was typed comes before one that only
+contains it, then the doctor's own usage, then the alphabet. "Name" is the brand,
+the composition or an alias. `everywhere=true` searches as `all` for that one
+request, which is the app's "Search all medicines" when `myList` finds nothing; it
+never changes the setting.
+
+Never searched: another clinic's items, another doctor's typed rows, anything that
+isn't `active`. A doctor's own typed row is found through their list, so one they
+took off stays off. No paid or promoted ranking, ever, and usage is only read for
+the doctor it describes: nothing here tells anyone outside a clinic who prescribes
+what.
+
+To stay fast at tens of thousands of rows, a row stores `nameKeys` (each name in
+lower case, from its start) and `wordKeys` (the same from each later word), and
+both are indexed behind scope, status and owner, so a search walks an index from
+the prefix instead of scanning. That makes "contains" mean "has a word starting
+with": `caff` finds `Paracetamol 500mg + Caffeine 65mg`, and `adol` doesn't find
+`Panadol`.
+
+**Typed and dictated lines.** On a save and at approval, a line without a `drugId`
+is linked to a drug the doctor can see whose brand, strength and form match,
+ignoring case and spacing. A line whose `drugId` the doctor can't see, or which has
+since been renamed, is treated the same way. Nothing is created on a save. At
+approval, a line still unmatched becomes a `doctor` row on the signing doctor's
+list, and the line gets its id. Then usage is counted: once per approval, per
+medicine, in `drugUsage`, which replaces the old `useCount`. Approval never fails
+over any of this. The speech-to-text prompt also gets the brands on the doctor's
+list, the most prescribed first.
+
+**The medicine manager.** A doctor adds one through `POST /members` with
+`role: 'medicineManager'`, and `locationIds` isn't needed. The role never changes
+once given: `PATCH /members/:id` refuses it, both ways.
 
 ## Auth
 
@@ -950,7 +1087,7 @@ does not.
 `member.roleChanged`, `location.added`, `location.updated`,
 `location.archived`, `report.uploaded`, `report.reviewed`,
 `notification.created`, `notification.read`, `session.revoked`,
-`settings.changed`.
+`settings.changed`, `medicines.changed`.
 
 Services emit; [src/listeners](src/listeners) decides what they cause. No service
 calls notification, SMS or realtime code directly, so adding push later means
@@ -1011,6 +1148,7 @@ another device.
 | `locations`     | a location is added, edited or archived                                                                 | everyone in the clinic                                                                              | locationId     |
 | `voice`         | a dictation segment is applied or fails                                                                 | the prescription's doctor                                                                           | prescriptionId |
 | `settings`      | a value or lock changes at a layer                                                                      | your own: that person in that clinic; a clinic's: everyone in it; the platform's: every socket      | none           |
+| `medicines`     | a list, a clinic item or a typed row changes                                                            | a clinic's: everyone in it; a doctor's own: that doctor                                             | drugId         |
 
 A patient found by their whole phone number (the 30-minute introduction in
 patient.service) does not make anyone hear about them; links do.
@@ -1059,10 +1197,6 @@ in-process state to move at the same time.
   and the app hears about a finished segment over the realtime socket. A queue
   is worth adding when load asks for it, and the housekeeping sweeps in
   [src/index.ts](src/index.ts) are plain timers for the same reason.
-- **No formulary import.** `drugs` starts empty and grows from use: a medicine
-  nobody has prescribed before is inserted, and the next time it matches. A
-  doctor's working repertoire is 200-400 drugs, so a text index with a prefix
-  fallback is plenty and Atlas Search is not needed.
 - **No push.** `POST /devices` answers 501. The inbox itself is live and the
   rows have been written since the first commit, so there was nothing to
   backfill when it went in.
@@ -1101,6 +1235,8 @@ The suites that exist to hold the six rules down:
 | [tests/integration/verifyRateLimit.test.ts](tests/integration/verifyRateLimit.test.ts)     | the verify routes share their own bucket of 30 a minute, and the 31st answers `RATE_LIMITED`                                                                                                                                                                                                                 |
 | [tests/integration/organisations.test.ts](tests/integration/organisations.test.ts)         | old practices read as clinics after the backfill; `platform:init` makes one platform and one admin and a second run changes nothing; a platform member is `FORBIDDEN` from the clinic routes; a role that doesn't fit its organisation is refused; `can` on `/me`; specialties, province and city round-trip |
 | [tests/integration/settings.test.ts](tests/integration/settings.test.ts)                   | the default when nothing is set; a person's value beats the clinic's unless the clinic locked it; a platform lock beats both; every kind of refusal is `VALIDATION_ERROR`; an assistant can't set the clinic's; changes are audited; `settings` reaches the person, the clinic or everyone                   |
+| [tests/integration/drugCatalog.test.ts](tests/integration/drugCatalog.test.ts)             | the import inserts, updates, discontinues and does nothing on a dry run; the type-ahead uses its index; the migration makes one row per doctor, drops what nobody used, matches usage and changes nothing the second time                                                                                    |
+| [tests/integration/medicines.test.ts](tests/integration/medicines.test.ts)                 | each mode's results and order; another clinic's items and another doctor's rows never appear; lists; a save creates nothing and approval makes one row; the medicine manager's reach; `medicines` reaches the right sockets                                                                                  |
 | [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited                                                                     |
 | [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                                                                                                   |
 | [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                                                                                                                                                           |

@@ -238,7 +238,7 @@ describe('The day to day', () => {
   });
 
   describe('drugs', () => {
-    test('the collection grows from what is prescribed, and then matches', async () => {
+    test("what was typed is the doctor's own once it is approved, and then matches for them", async () => {
       const { doctor, patientId } = await aClinic('+923006660040');
       const headers = headersFor(doctor, { location: true });
 
@@ -256,14 +256,20 @@ describe('The day to day', () => {
         .send({ ops: [{ op: 'add', section: 'medicines', value: { name: 'Risek', strength: '20mg', form: 'cap' } }] })
         .expect(200);
 
-      // The line is linked to the drug that was just created for it.
-      expect(written.body.data.sections.medicines[0].drugId).toMatch(/^[0-9a-f]{24}$/);
+      // Nothing is made on a save.
+      expect(written.body.data.sections.medicines[0].drugId).toBeNull();
+
+      const approved = await request(app)
+        .post(`/api/v1/prescriptions/${draft.body.data.id}/approve`)
+        .set(headers)
+        .expect(200);
+      expect(approved.body.data.sections.medicines[0].drugId).toMatch(/^[0-9a-f]{24}$/);
 
       const found = await request(app).get('/api/v1/drugs').query({ q: 'Risek' }).set(headersFor(doctor)).expect(200);
       expect(found.body.data).toHaveLength(1);
-      expect(found.body.data[0]).toMatchObject({ brand: 'Risek', strength: '20mg', form: 'cap' });
+      expect(found.body.data[0]).toMatchObject({ brand: 'Risek', strength: '20mg', form: 'cap', verified: false });
 
-      // A prefix matches too, which a plain text index would not manage.
+      // A prefix matches too.
       const typeAhead = await request(app).get('/api/v1/drugs').query({ q: 'ris' }).set(headersFor(doctor)).expect(200);
       expect(typeAhead.body.data).toHaveLength(1);
     });

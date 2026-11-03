@@ -20,6 +20,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed:patients": "ts-node src/scripts/seedPatients.ts",
     "platform:init": "ts-node src/scripts/platformInit.ts",
+    "drugs:import": "ts-node src/scripts/drugsImport.ts",
+    "drugs:migrate-typed": "ts-node src/scripts/drugsMigrateTyped.ts",
     "test": "jest -i --colors --verbose --detectOpenHandles",
     "test:watch": "jest -i --watchAll",
     "coverage": "jest -i --coverage",

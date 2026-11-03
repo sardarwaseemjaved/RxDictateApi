@@ -52,7 +52,8 @@ const assertLocations = async (scope: Scope, locationIds: string[]): Promise<Typ
  * same user, with a second membership, and she notices nothing.
  */
 export const addMember = async (scope: Scope, body: AddMemberBody): Promise<MemberView> => {
-  const locationIds = await assertLocations(scope, body.locationIds);
+  // A medicine manager reaches every location, so nothing is kept on the membership.
+  const locationIds = body.role === 'medicineManager' ? [] : await assertLocations(scope, body.locationIds);
 
   let user = await User.findOne({ phone: body.phone });
   if (!user) {
@@ -109,6 +110,14 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
   const user = await User.findById(membership.userId);
   const before = toMemberView(membership, user);
 
+  // A medicine manager stays one until they are removed, and has no locations to edit.
+  const isManager = membership.role === 'medicineManager';
+  if (isManager && patch.role) {
+    throw new AppError('VALIDATION_ERROR', "body.role: a medicine manager's role cannot change", [
+      { field: 'body.role', message: 'cannot change: remove them and add them again' },
+    ]);
+  }
+
   // The owner must stay a doctor, or a practice can be left with nobody who
   // can approve a prescription.
   if (patch.role && patch.role !== membership.role && membership.role === 'doctor') {
@@ -120,8 +129,8 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
 
   const roleChanged = patch.role !== undefined && patch.role !== membership.role;
   if (patch.role) membership.role = patch.role;
-  const locationsChanged = patch.locationIds !== undefined;
-  if (patch.locationIds) {
+  const locationsChanged = patch.locationIds !== undefined && !isManager;
+  if (patch.locationIds && !isManager) {
     membership.locationIds = await assertLocations(scope, patch.locationIds);
   }
   if (patch.name && user) {

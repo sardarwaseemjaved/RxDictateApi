@@ -23,7 +23,15 @@ export type OrganisationType = z.infer<typeof organisationTypeSchema>;
  * Each role belongs to one organisation type (ROLES_BY_ORGANISATION_TYPE), and
  * a membership whose role does not fit its organisation is refused.
  */
-export const roleSchema = z.enum(['doctor', 'pa', 'patient', 'platformAdmin', 'reviewer', 'contentManager']);
+export const roleSchema = z.enum([
+  'doctor',
+  'pa',
+  'medicineManager',
+  'patient',
+  'platformAdmin',
+  'reviewer',
+  'contentManager',
+]);
 export type Role = z.infer<typeof roleSchema>;
 
 /**
@@ -32,7 +40,7 @@ export type Role = z.infer<typeof roleSchema>;
  * can belong to one.
  */
 export const ROLES_BY_ORGANISATION_TYPE: Record<OrganisationType, readonly Role[]> = {
-  clinic: ['doctor', 'pa', 'patient'],
+  clinic: ['doctor', 'pa', 'medicineManager', 'patient'],
   platform: ['platformAdmin', 'reviewer', 'contentManager'],
   company: [],
 };
@@ -83,6 +91,12 @@ export const ACTIONS = [
   'voice.read',
 
   'drug.search',
+
+  'drugList.read',
+  // A doctor's own list in this clinic, the medicines they add for themselves, and their typed rows.
+  'drugList.own.manage',
+  // The clinic's list, and the items only this clinic has.
+  'drugList.clinic.manage',
 
   'template.read',
   'template.create',

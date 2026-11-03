@@ -1,12 +1,14 @@
 import type { Types } from 'mongoose';
 import { Setting, type SettingDoc } from '../models';
 import { AppError } from '../core/errors';
+import { can } from '../core/permissions';
 import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
 import type { Scope } from '../core/db';
 import {
   SETTING_KEYS,
   definitionOf,
+  organisationActionOf,
   type SettingKey,
   type SettingLayer,
   type SettingSource,
@@ -182,11 +184,21 @@ export const updateUserSettings = async (
   patch: SettingsPatch,
 ): Promise<SettingsView> => write(scope, 'user', patch);
 
-/** PATCH /settings/organisation: the clinic's values and locks, for everyone in it. */
+/**
+ * PATCH /settings/organisation: the clinic's values and locks, for everyone in
+ * it. Each key names the action that sets it, so a medicine manager can set the
+ * clinic's medicine mode and nothing else. One key they may not set refuses the
+ * whole patch.
+ */
 export const updateOrganisationSettings = async (
   scope: Scope & { requestId?: string | null },
   patch: SettingsPatch,
-): Promise<SettingsView> => write(scope, 'organisation', patch);
+): Promise<SettingsView> => {
+  if (!patch.values.every(({ key }) => can(scope.role, organisationActionOf(key)))) {
+    throw new AppError('FORBIDDEN', 'You cannot change that setting for this clinic.');
+  }
+  return write(scope, 'organisation', patch);
+};
 
 /** PATCH /settings/platform: values and locks for every organisation. */
 export const updatePlatformSettings = async (

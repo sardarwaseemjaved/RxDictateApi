@@ -73,6 +73,31 @@ describe('The permissions table', () => {
     });
   });
 
+  describe('medicines', () => {
+    test("a doctor manages both lists, and a medicine manager only the clinic's", () => {
+      expect(can('doctor', 'drugList.own.manage')).toBe(true);
+      expect(can('doctor', 'drugList.clinic.manage')).toBe(true);
+      expect(can('medicineManager', 'drugList.own.manage')).toBe(false);
+      expect(can('medicineManager', 'drugList.clinic.manage')).toBe(true);
+    });
+
+    test('a medicine manager gets exactly this and nothing else', () => {
+      expect([...actionsFor('medicineManager')].sort()).toEqual(
+        ['drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
+      );
+    });
+
+    test('an assistant holds none of it', () => {
+      (['drug.search', 'drugList.read', 'drugList.own.manage', 'drugList.clinic.manage'] as const).forEach((action) => {
+        expect(can('pa', action)).toBe(false);
+      });
+    });
+
+    test('a medicine manager is a clinic role', () => {
+      expect(ROLES_BY_ORGANISATION_TYPE.clinic).toContain('medicineManager');
+    });
+  });
+
   describe('settings and the platform', () => {
     test('everybody who works somewhere reads settings; a patient still holds nothing', () => {
       ['doctor', 'pa', 'platformAdmin', 'reviewer', 'contentManager'].forEach((role) => {

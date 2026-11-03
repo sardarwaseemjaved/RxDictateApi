@@ -43,6 +43,9 @@ const BUILT: Route[] = [
   { method: 'get', path: '/api/v1/prescriptions', location: true },
 
   { method: 'get', path: '/api/v1/drugs?q=panadol' },
+  { method: 'post', path: '/api/v1/drugs', body: { brand: 'Local syrup', for: 'clinic' } },
+  { method: 'get', path: '/api/v1/drug-lists/me' },
+  { method: 'get', path: '/api/v1/drug-lists/clinic' },
 
   { method: 'get', path: '/api/v1/appointments?from=2026-10-01&to=2026-10-31', location: true },
   { method: 'get', path: '/api/v1/follow-ups', location: true },

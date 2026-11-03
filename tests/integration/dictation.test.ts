@@ -107,6 +107,23 @@ describe('Dictation through OpenAI', () => {
       expect(chat.response_format.json_schema.schema.required).toEqual(['ops', 'spans']);
     });
 
+    test("the names on the doctor's own list are given to the transcriber too", async () => {
+      const stub = stubOpenAi({ transcript: 'Risek raat ko.', extraction: { ops: [], spans: [] } });
+
+      const { doctor, patientId } = await aClinic('+923011110012');
+      await request(app)
+        .post('/api/v1/drugs')
+        .set(headersFor(doctor))
+        .send({ brand: 'Risek', strength: '20mg', form: 'cap', for: 'me' })
+        .expect(201);
+
+      const draft = await aDraft(doctor, patientId, 'voice');
+      await upload(doctor, draft.id, 1, speak('x')).expect(201);
+      await settled(doctor, draft.id, 1);
+
+      expect(String(stub.transcriptionForm().get('prompt'))).toContain('Risek');
+    });
+
     test('the drug names already on the draft are given to the transcriber', async () => {
       const stub = stubOpenAi({ transcript: 'Rosuvastatin raat ko.', extraction: { ops: [], spans: [] } });
 

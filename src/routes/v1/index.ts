@@ -11,6 +11,7 @@ import visitRoute from './visit.route';
 import prescriptionRoute from './prescription.route';
 import voiceRoute from './voice.route';
 import drugRoute from './drug.route';
+import drugListRoute from './drugList.route';
 import notificationRoute from './notification.route';
 import deviceRoute from './device.route';
 import templateRoute from './template.route';
@@ -55,6 +56,7 @@ const routes = [
   { path: '/prescriptions', route: prescriptionRoute },
   { path: '/voice', route: voiceRoute },
   { path: '/drugs', route: drugRoute },
+  { path: '/drug-lists', route: drugListRoute },
   { path: '/appointments', route: appointmentRoute },
   { path: '/follow-ups', route: followUpRoute },
   { path: '/reports', route: reportRoute },

@@ -10,7 +10,9 @@ export { PatientIntroduction, type IPatientIntroduction, type PatientIntroductio
 export { Visit, type IVisit, type VisitDoc } from './visit.model';
 export { Prescription, type IPrescription, type PrescriptionDoc } from './prescription.model';
 export { VoiceSession, type ISegment, type IVoiceSession, type VoiceSessionDoc } from './voiceSession.model';
-export { Drug, type IDrug, type DrugDoc } from './drug.model';
+export { Drug, drugKeys, identityKeyOf, normaliseName, type IDrug, type DrugDoc } from './drug.model';
+export { DrugList, type IDrugList, type IDrugListItem, type DrugListDoc } from './drugList.model';
+export { DrugUsage, type IDrugUsage, type DrugUsageDoc } from './drugUsage.model';
 export { AuditLog, type IAuditLog, type AuditLogDoc } from './auditLog.model';
 export { Notification, type INotification, type NotificationDoc } from './notification.model';
 export { Template, type ITemplate, type TemplateDoc } from './template.model';
@@ -34,7 +36,9 @@ import { PatientIntroduction } from './patientIntroduction.model';
 import { Visit } from './visit.model';
 import { Prescription } from './prescription.model';
 import { VoiceSession } from './voiceSession.model';
-import { Drug } from './drug.model';
+import { Drug, RETIRED_DRUG_INDEXES } from './drug.model';
+import { DrugList } from './drugList.model';
+import { DrugUsage } from './drugUsage.model';
 import { AuditLog } from './auditLog.model';
 import { Notification } from './notification.model';
 import { Template } from './template.model';
@@ -65,6 +69,8 @@ export const allModels = [
   Prescription,
   VoiceSession,
   Drug,
+  DrugList,
+  DrugUsage,
   AuditLog,
   Notification,
   Template,
@@ -79,6 +85,26 @@ export const allModels = [
 ];
 
 /**
+ * Indexes the code no longer declares, which createIndexes would otherwise
+ * leave in place for good. The old unique brand, strength and form on `drugs`
+ * is the one that matters: it refuses the one copy per doctor that the catalog
+ * is now made of.
+ */
+const dropRetiredIndexes = async (): Promise<void> => {
+  await Promise.all(
+    RETIRED_DRUG_INDEXES.map(async (name) => {
+      try {
+        if (await Drug.collection.indexExists(name)) {
+          await Drug.collection.dropIndex(name);
+        }
+      } catch (error) {
+        logger.warn(`could not drop the old index ${name} on drugs: ${(error as Error).message}`);
+      }
+    }),
+  );
+};
+
+/**
  * Create every collection and build its indexes.
  *
  * Idempotent, so it is safe to run on every boot. A failure is logged rather
@@ -86,6 +112,8 @@ export const allModels = [
  * a reason to refuse to serve traffic.
  */
 export const syncCollections = async (): Promise<void> => {
+  await Drug.createCollection();
+  await dropRetiredIndexes();
   await Promise.all(
     allModels.map(async (model) => {
       try {

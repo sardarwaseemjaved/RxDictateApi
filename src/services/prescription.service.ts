@@ -40,7 +40,7 @@ import type { PageMeta, SignedUrlView } from '../shared';
 import { addDays, ageFromDob, karachiDayRange } from '../utils/time';
 import { applyOps, isEmpty, wireSections } from './prescriptionOps.service';
 import { nextPrescriptionNumber } from './counter.service';
-import { findOrCreateDrug } from './drug.service';
+import { countDrugUsage, linkMedicines, settleMedicines } from './drug.service';
 import { findPatientOrFail, linkPatient, patientMatch, toPatientSummary, visiblePatients } from './patient.service';
 import { renderPrescription, renderPreview } from './pdf.service';
 import { findOwnTemplate, markTemplateUsed } from './template.service';
@@ -437,34 +437,37 @@ export const createFromTemplate = async (
 };
 
 /**
- * Fill in drugId for any medicine that does not have one, inserting the drug if
- * this is the first time anyone has prescribed it. This is what grows the
- * formulary from real use instead of from an import.
+ * On a save: link each medicine line to a drug this doctor can see. Nothing is
+ * created until the prescription is approved, and a prescription is not worth
+ * failing over the catalog: a line that cannot be linked stays as it is and is
+ * looked at again next time.
  */
-const resolveMedicineDrugs = async (prescription: PrescriptionDoc, actorId: Types.ObjectId): Promise<void> => {
+const linkDraftMedicines = async (scope: Scope, prescription: PrescriptionDoc): Promise<void> => {
   const sections = wireSections(prescription.sections);
-  if (sections.medicines.every((medicine) => medicine.drugId)) {
+  if (sections.medicines.length === 0) {
     return;
   }
+  try {
+    prescription.set('sections', { ...sections, medicines: await linkMedicines(scope, sections.medicines) });
+  } catch (error) {
+    logger.warn(`could not link the medicine lines of a draft: ${(error as Error).message}`);
+  }
+};
 
-  const medicines = await Promise.all(
-    sections.medicines.map(async (medicine) => {
-      if (medicine.drugId) {
-        return medicine;
-      }
-      try {
-        const drug = await findOrCreateDrug(medicine, actorId);
-        return { ...medicine, drugId: String(drug._id) };
-      } catch (error) {
-        // A prescription is not worth failing over the formulary; the medicine
-        // stays unlinked and will match next time.
-        logger.warn(`could not resolve a drug for a medicine line: ${(error as Error).message}`);
-        return medicine;
-      }
-    }),
-  );
-
-  prescription.set('sections', { ...sections, medicines });
+/**
+ * At approval: every line ends up with a drug, making a row on the doctor's own
+ * list for one that matches nothing. Approval never fails over this.
+ */
+const settleApprovedMedicines = async (scope: Scope, prescription: PrescriptionDoc): Promise<void> => {
+  const sections = wireSections(prescription.sections);
+  if (sections.medicines.length === 0) {
+    return;
+  }
+  try {
+    prescription.set('sections', { ...sections, medicines: await settleMedicines(scope, sections.medicines) });
+  } catch (error) {
+    logger.warn(`could not settle the medicine lines of a prescription: ${(error as Error).message}`);
+  }
 };
 
 /**
@@ -496,7 +499,7 @@ export const patchPrescription = async (scope: Scope, id: string, body: PatchPre
     prescription.printLanguage = body.printLanguage;
   }
 
-  await resolveMedicineDrugs(prescription, scope.actorId);
+  await linkDraftMedicines(scope, prescription);
   await prescription.save();
 
   const after = toPrescriptionView(prescription);
@@ -611,8 +614,15 @@ export const approvePrescription = async (scope: Scope, id: string, doctorName: 
   // so there is never an approved prescription a pharmacist cannot check.
   prescription.verificationCode = newVerificationCode();
 
-  await resolveMedicineDrugs(prescription, scope.actorId);
+  await settleApprovedMedicines(scope, prescription);
   await prescription.save();
+
+  // Once per approval, and never on a save. Ordering suggestions is not worth failing a signature over.
+  try {
+    await countDrugUsage(scope, wireSections(prescription.sections).medicines, approvedAt);
+  } catch (error) {
+    logger.warn(`could not count medicine usage for a prescription: ${(error as Error).message}`);
+  }
 
   // Dictation audio is kept for a while after approval and then deleted. The
   // clock starts here, because that is the point at which the recording has

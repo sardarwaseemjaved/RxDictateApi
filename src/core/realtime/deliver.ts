@@ -1,9 +1,10 @@
 import { Types } from 'mongoose';
 import { WebSocket } from 'ws';
 import type { ErrorCode } from '../../shared/errorCodes';
-import type { RealtimeServerMessage } from '../../shared/realtime.schema';
-import type { Role } from '../../shared/roles';
+import type { RealtimeServerMessage, RealtimeTopic } from '../../shared/realtime.schema';
+import type { Action, Role } from '../../shared/roles';
 import { canSeePatient } from '../../services/patient.service';
+import { can } from '../permissions';
 import { allowedLocationsFor } from '../tenancy';
 import { everyConnection, inPractice, ofMember, onLocation, onSession, unregister, type Connection } from './registry';
 
@@ -68,6 +69,32 @@ export const closeConnection = (connection: Connection, code: ErrorCode, message
   refuse(connection.socket, code, message);
 };
 
+/**
+ * What a member must hold to hear a topic. Reaching every location is not the
+ * same as seeing what happens there: a medicine manager reaches them all and
+ * must not hear about patients, visits or prescriptions, even as a bare id.
+ * Null is for what everyone in a clinic hears.
+ */
+const TOPIC_READ: Record<RealtimeTopic, Action | null> = {
+  visits: 'visit.read',
+  vitals: 'visit.read',
+  prescriptions: 'prescription.read',
+  appointments: 'appointment.read',
+  patients: 'patient.read',
+  reports: 'report.read',
+  notifications: 'notification.read',
+  team: null,
+  locations: null,
+  voice: 'voice.read',
+  settings: 'settings.read',
+  medicines: null,
+};
+
+const mayHear = (connection: Connection, message: RealtimeServerMessage): boolean => {
+  const action = message.type === 'changed' ? TOPIC_READ[message.topic] : null;
+  return action === null || can(connection.role, action);
+};
+
 const audienceOf = (audience: Audience): Connection[] => {
   switch (audience.to) {
     case 'location':
@@ -113,7 +140,9 @@ export const deliverHere = (delivery: Delivery): void => {
 
   const connections = audienceOf(delivery.audience);
   if (delivery.kind === 'send') {
-    connections.forEach((connection) => sendTo(connection.socket, delivery.message));
+    connections
+      .filter((connection) => mayHear(connection, delivery.message))
+      .forEach((connection) => sendTo(connection.socket, delivery.message));
   } else {
     connections.forEach((connection) => closeConnection(connection, delivery.code, delivery.message));
   }

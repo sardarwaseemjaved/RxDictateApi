@@ -2,6 +2,7 @@ export * as appointmentService from './appointment.service';
 export * as authService from './auth.service';
 export * as counterService from './counter.service';
 export * as drugService from './drug.service';
+export * as drugListService from './drugList.service';
 export * as llmService from './llm.service';
 export * as locationService from './location.service';
 export * as meService from './me.service';

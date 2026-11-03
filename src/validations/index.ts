@@ -1,6 +1,7 @@
 export * as appointmentValidation from './appointment.validation';
 export * as authValidation from './auth.validation';
 export * as drugValidation from './drug.validation';
+export * as drugListValidation from './drugList.validation';
 export * as locationValidation from './location.validation';
 export * as meValidation from './me.validation';
 export * as notificationValidation from './notification.validation';
