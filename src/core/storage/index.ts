@@ -80,6 +80,14 @@ export const reportKey = (
 export const reportPageKey = (practiceId: Types.ObjectId | string, pageId: string, extension: string): string =>
   `${practiceId}/reports/pages/${pageId}.${extension}`;
 
+/**
+ * Where a page a patient uploads lands, under the link it was issued to, so a
+ * report can only claim pages asked for through that same link. Staff keys
+ * live under `pages/`, so neither side can claim the other's.
+ */
+export const portalReportPrefix = (practiceId: Types.ObjectId | string, linkId: Types.ObjectId | string): string =>
+  `${practiceId}/reports/portal/${linkId}/`;
+
 /** The file extension for an uploaded report page. */
 export const reportExtensionFor = (contentType: string): string =>
   ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' })[contentType] ?? 'bin';
@@ -397,6 +405,7 @@ export default {
   prescriptionPreviewKey,
   reportKey,
   reportPageKey,
+  portalReportPrefix,
   extensionFor,
   reportExtensionFor,
 };

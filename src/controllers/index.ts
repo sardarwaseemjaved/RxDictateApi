@@ -6,6 +6,7 @@ export * as locationController from './location.controller';
 export * as meController from './me.controller';
 export * as notificationController from './notification.controller';
 export * as patientController from './patient.controller';
+export * as portalController from './portal.controller';
 export * as practiceController from './practice.controller';
 export * as prescriptionController from './prescription.controller';
 export * as reportController from './report.controller';

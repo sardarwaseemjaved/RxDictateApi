@@ -768,6 +768,20 @@ export const revisePrescription = async (scope: Scope, id: string, body: ReviseP
   return after;
 };
 
+/** The print file of a signed prescription, whoever may have it, rendered if nobody has asked before. */
+export const printFileOf = async (prescription: PrescriptionDoc): Promise<SignedUrlView & { driver: string }> => {
+  if (!prescription.pdfKey) {
+    const patient = await Patient.findById(prescription.patientId);
+    const age = patient?.dob ? ageFromDob(patient.dob) : (patient?.age ?? null);
+    // eslint-disable-next-line no-param-reassign
+    prescription.pdfKey = await renderPrescription(prescription, patient?.name ?? '', age);
+    await prescription.save();
+  }
+
+  const signed = await signedGetUrl(prescription.pdfKey);
+  return { ...signed, driver: prescription.pdfKey.endsWith('.pdf') ? 'pdf' : 'html' };
+};
+
 /**
  * The print file, as a short-lived signed URL.
  *
@@ -781,14 +795,7 @@ export const prescriptionPdf = async (scope: Scope, id: string): Promise<SignedU
     throw new AppError('RX_NOT_APPROVED', 'A draft cannot be printed. Approve it first.');
   }
 
-  if (!prescription.pdfKey) {
-    const patient = await Patient.findById(prescription.patientId);
-    const age = patient?.dob ? ageFromDob(patient.dob) : (patient?.age ?? null);
-    prescription.pdfKey = await renderPrescription(prescription, patient?.name ?? '', age);
-    await prescription.save();
-  }
-
-  const signed = await signedGetUrl(prescription.pdfKey);
+  const file = await printFileOf(prescription);
   await writeAudit(scope, {
     action: 'prescription.print',
     entity: 'prescription',
@@ -796,7 +803,7 @@ export const prescriptionPdf = async (scope: Scope, id: string): Promise<SignedU
     after: { number: prescription.number },
   });
 
-  return { ...signed, driver: prescription.pdfKey.endsWith('.pdf') ? 'pdf' : 'html' };
+  return file;
 };
 
 /**

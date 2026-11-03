@@ -36,7 +36,7 @@ export type Role = z.infer<typeof roleSchema>;
 
 /**
  * Which roles each kind of organisation holds. `patient` is still reserved: no
- * route gives it out. A company has no roles until companies exist, so nobody
+ * route gives it out, and a patient's link is not a membership. A company has no roles until companies exist, so nobody
  * can belong to one.
  */
 export const ROLES_BY_ORGANISATION_TYPE: Record<OrganisationType, readonly Role[]> = {
@@ -75,6 +75,10 @@ export const ACTIONS = [
   'patient.create',
   'patient.update',
   'patient.history',
+  // A patient's online access, as the clinic sees and controls it.
+  'patient.portal.read',
+  'patient.portal.invite',
+  'patient.portal.manage',
 
   'visit.read',
   'visit.create',

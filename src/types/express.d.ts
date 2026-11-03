@@ -1,5 +1,6 @@
 import type { Types } from 'mongoose';
 import type { OrganisationType, Role } from '../shared/roles';
+import type { PortalRecord } from '../services/portal.service';
 
 /**
  * What the middleware chain hangs on the request, in the order it is set:
@@ -39,6 +40,8 @@ declare global {
       id?: string;
       auth?: AuthContext;
       ctx?: PracticeContext;
+      /** Set by resolvePortalLink on a patient's record routes. */
+      portal?: PortalRecord;
     }
   }
 }

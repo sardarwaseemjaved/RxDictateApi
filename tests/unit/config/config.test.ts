@@ -39,6 +39,7 @@ describe('Config', () => {
       process.env.OTP_FIXED_CODE = '123456';
       process.env.CORS_ORIGINS = 'https://app.example.com';
       process.env.VERIFY_BASE_URL = 'https://app.example.com/v';
+      process.env.INVITE_BASE_URL = 'https://app.example.com/i';
 
       const config = load();
 
@@ -82,6 +83,27 @@ describe('Config', () => {
       process.env.NODE_ENV = 'development';
       process.env.CORS_ORIGINS = 'http://localhost:8081';
       expect(load().cors.origins).toEqual(['http://localhost:8081']);
+    });
+  });
+
+  describe('INVITE_BASE_URL', () => {
+    test('production refuses to boot without it, because an SMS that links at a guess cannot be taken back', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.CORS_ORIGINS = 'https://app.example.com';
+      process.env.VERIFY_BASE_URL = 'https://app.example.com/v';
+      process.env.INVITE_BASE_URL = '';
+      expect(load).toThrow(/INVITE_BASE_URL must be set in production/);
+    });
+
+    test('loses a trailing slash, so a code is appended cleanly', () => {
+      process.env.INVITE_BASE_URL = 'https://app.example.com/i/';
+      expect(load().invite.baseUrl).toBe('https://app.example.com/i');
+    });
+
+    test('blank reads as unset outside production, and is guessed', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.INVITE_BASE_URL = '';
+      expect(load().invite.baseUrl).toMatch(/:5173\/i$/);
     });
   });
 

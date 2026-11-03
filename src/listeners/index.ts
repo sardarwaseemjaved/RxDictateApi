@@ -1,8 +1,9 @@
 import logger from '../config/logger';
 import { on } from '../core/events';
-import { sendMemberAdded } from '../core/sms';
-import { Practice, User } from '../models';
+import { sendMemberAdded, sendPortalInvite } from '../core/sms';
+import { Membership, Practice, Prescription, User } from '../models';
 import { notify, notifyPractice } from '../services/notification.service';
+import { inviteAfterApproval, inviteUrl } from '../services/patientPortal.service';
 import { karachiDay } from '../utils/time';
 // What each write tells the open apps over the realtime socket. Imported for the side effect.
 import './realtime';
@@ -61,6 +62,33 @@ on('prescription.revised', async ({ practiceId, prescriptionId, version, actorId
     actorId,
     roles: ['pa'],
   });
+});
+
+/**
+ * Here rather than in the approval, so an invite can never delay or fail one.
+ * patientPortal.service decides whether one goes out.
+ */
+on('prescription.approved', inviteAfterApproval);
+
+/**
+ * The invite's SMS. A failure is caught by the bus and sendPortalInvite swallows
+ * its own, so the write that caused it stands.
+ *
+ * Named after the doctor who signed the patient's latest prescription, or the
+ * doctor sending it. An assistant pressing the button is not a doctor, so with
+ * neither it names only the clinic.
+ */
+on('patient.portalInvited', async ({ practiceId, patientId, phone, code, actorId }) => {
+  const [practice, signed, sender] = await Promise.all([
+    Practice.findById(practiceId),
+    Prescription.findOne({ practiceId, patientId, status: 'approved', deletedAt: null })
+      .sort({ approvedAt: -1 })
+      .select('letterheadSnapshot.doctorName'),
+    Membership.findOne({ practiceId, userId: actorId, role: 'doctor', status: 'active' }).select('userId'),
+  ]);
+  const doctor = signed?.letterheadSnapshot?.doctorName || (sender ? (await User.findById(actorId))?.name : '') || '';
+
+  await sendPortalInvite(phone, doctor, practice?.name ?? 'the clinic', inviteUrl(code), signed !== null);
 });
 
 /**

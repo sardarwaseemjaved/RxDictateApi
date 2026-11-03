@@ -6,6 +6,7 @@ export * as locationValidation from './location.validation';
 export * as meValidation from './me.validation';
 export * as notificationValidation from './notification.validation';
 export * as patientValidation from './patient.validation';
+export * as portalValidation from './portal.validation';
 export * as practiceValidation from './practice.validation';
 export * as prescriptionValidation from './prescription.validation';
 export * as reportValidation from './report.validation';

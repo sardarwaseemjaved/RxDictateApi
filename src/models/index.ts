@@ -6,6 +6,14 @@ export { User, type IUser, type UserDoc } from './user.model';
 export { Membership, type IMembership, type MembershipDoc } from './membership.model';
 export { OtpCode, type IOtpCode, type OtpCodeDoc } from './otpCode.model';
 export { Patient, type IPatient, type PatientDoc } from './patient.model';
+export {
+  PatientLink,
+  LIVE_LINK_STATUSES,
+  type IPatientLink,
+  type PatientLinkDoc,
+  type PatientLinkEndReason,
+} from './patientLink.model';
+export { PatientInvite, type IPatientInvite, type PatientInviteDoc } from './patientInvite.model';
 export { PatientIntroduction, type IPatientIntroduction, type PatientIntroductionDoc } from './patientIntroduction.model';
 export { Visit, type IVisit, type VisitDoc } from './visit.model';
 export { Prescription, type IPrescription, type PrescriptionDoc } from './prescription.model';
@@ -32,6 +40,8 @@ import { User } from './user.model';
 import { Membership } from './membership.model';
 import { OtpCode } from './otpCode.model';
 import { Patient } from './patient.model';
+import { PatientLink } from './patientLink.model';
+import { PatientInvite } from './patientInvite.model';
 import { PatientIntroduction } from './patientIntroduction.model';
 import { Visit } from './visit.model';
 import { Prescription } from './prescription.model';
@@ -64,6 +74,8 @@ export const allModels = [
   Membership,
   OtpCode,
   Patient,
+  PatientLink,
+  PatientInvite,
   PatientIntroduction,
   Visit,
   Prescription,
@@ -105,6 +117,40 @@ const dropRetiredIndexes = async (): Promise<void> => {
 };
 
 /**
+ * `vitals.visitId_1` was first built without `unique`. createIndexes neither
+ * changes an index nor replaces one of the same name, so a database from then
+ * warns on every boot and never gets the one-per-visit rule. The old index is
+ * dropped here so the unique one can be built, unless two readings already
+ * share a visit: that would fail the build and leave the lookup with no index,
+ * so the old one stays until somebody has looked at those readings.
+ */
+const makeVitalsIndexUnique = async (): Promise<void> => {
+  try {
+    await Vital.createCollection();
+    const old = (await Vital.collection.indexes()).find((index) => index.name === 'visitId_1');
+    if (!old || old.unique) {
+      return;
+    }
+    const [repeated] = await Vital.collection
+      .aggregate<{ visits: number }>([
+        { $group: { _id: '$visitId', readings: { $sum: 1 } } },
+        { $match: { readings: { $gt: 1 } } },
+        { $count: 'visits' },
+      ])
+      .toArray();
+    if (repeated) {
+      logger.warn(
+        `vitals: ${repeated.visits === 1 ? '1 visit has' : `${repeated.visits} visits have`} more than one set of vitals, so the index cannot be made unique yet`,
+      );
+      return;
+    }
+    await Vital.collection.dropIndex('visitId_1');
+  } catch (error) {
+    logger.warn(`could not make the vitals index unique: ${(error as Error).message}`);
+  }
+};
+
+/**
  * Create every collection and build its indexes.
  *
  * Idempotent, so it is safe to run on every boot. A failure is logged rather
@@ -114,6 +160,7 @@ const dropRetiredIndexes = async (): Promise<void> => {
 export const syncCollections = async (): Promise<void> => {
   await Drug.createCollection();
   await dropRetiredIndexes();
+  await makeVitalsIndexUnique();
   await Promise.all(
     allModels.map(async (model) => {
       try {

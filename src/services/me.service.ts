@@ -5,6 +5,7 @@ import { writeAudit } from '../core/audit';
 import { allowedLocationsFor } from '../core/tenancy';
 import type { MeView, UpdateMeBody } from '../shared/me.schema';
 import { membershipViews } from './auth.service';
+import { countLinks } from './portal.service';
 
 /**
  * The one call the app makes on launch: who am I, and which clinics and
@@ -24,6 +25,7 @@ export const getMe = async (userId: Types.ObjectId): Promise<MeView> => {
     lastLoginAt: user.lastLoginAt,
     specialties: user.specialties,
     memberships: await membershipViews(user._id),
+    portalLinks: await countLinks(user._id),
   };
 };
 

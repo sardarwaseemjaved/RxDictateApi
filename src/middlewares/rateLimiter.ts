@@ -70,4 +70,15 @@ export const verifyLimiter = limiter({
   limit: () => config.rateLimit.verifyMax,
 });
 
-export default { generalLimiter, authLimiter, otpLimiter, logoutLimiter, verifyLimiter };
+/**
+ * The routes that try a code to link a record, in their own bucket shared by
+ * both. Keyed on the person rather than the address, because a whole mobile
+ * network can sit behind one IP here. Mounted after requireAuth.
+ */
+export const portalLinkLimiter = limiter({
+  windowMs: 60 * 1000,
+  limit: () => config.rateLimit.portalLinkMax,
+  keyGenerator: (req: Request) => `user:${String(req.auth?.userId)}`,
+});
+
+export default { generalLimiter, authLimiter, otpLimiter, logoutLimiter, verifyLimiter, portalLinkLimiter };

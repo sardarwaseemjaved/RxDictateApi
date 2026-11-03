@@ -43,6 +43,11 @@ export interface IPatient {
    * finder, never filtered by hand.
    */
   locationIds: Types.ObjectId[];
+  /**
+   * "Don't share online": this record can't be linked or served to a patient.
+   * Turning it on ends any link it has.
+   */
+  portalBlocked: boolean;
   addedBy: Types.ObjectId;
   createdBy: Types.ObjectId;
   deletedAt: Date | null;
@@ -66,6 +71,7 @@ const patientSchema = new Schema<IPatient>(
     conditions: { type: [String], default: [] },
     lastVisitDate: { type: String, default: null },
     locationIds: { type: [{ type: Schema.Types.ObjectId, ref: 'Location' }], default: [] },
+    portalBlocked: { type: Boolean, default: false },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     deletedAt: { type: Date, default: null },

@@ -54,6 +54,11 @@ export const ERROR_CODES = [
   'VOICE_SEGMENT_BUSY',
   'TRANSCRIPTION_FAILED',
 
+  // The patient's area
+  'PORTAL_LINK_FAILED',
+  'PORTAL_LINK_UNAVAILABLE',
+  'PORTAL_INVITE_TOO_SOON',
+
   // Capability
   'FEATURE_DISABLED',
   'STORAGE_UNAVAILABLE',
@@ -112,6 +117,13 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   VOICE_SESSION_CLOSED: 409,
   VOICE_SEGMENT_BUSY: 409,
   TRANSCRIPTION_FAILED: 422,
+
+  /** One answer for every reason a record can't be linked, so none of them says whether it exists. */
+  PORTAL_LINK_FAILED: 400,
+  /** The caller's own link, which is dormant or whose clinic has the portal off. GET /portal/links says which. */
+  PORTAL_LINK_UNAVAILABLE: 403,
+  /** One invite per record per day. `details.retryAt` says when. */
+  PORTAL_INVITE_TOO_SOON: 429,
 
   FEATURE_DISABLED: 403,
   STORAGE_UNAVAILABLE: 503,

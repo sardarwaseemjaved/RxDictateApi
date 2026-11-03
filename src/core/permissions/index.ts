@@ -44,6 +44,10 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'patient.create': ['doctor', 'pa'],
   'patient.update': ['doctor', 'pa'],
   'patient.history': ['doctor'],
+  // Both, because a patient may well ask at the front desk.
+  'patient.portal.read': ['doctor', 'pa'],
+  'patient.portal.invite': ['doctor', 'pa'],
+  'patient.portal.manage': ['doctor', 'pa'],
 
   'visit.read': ['doctor', 'pa'],
   'visit.create': ['doctor', 'pa'],
@@ -88,7 +92,7 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
 
   // Everybody who works somewhere reads what applies to them and sets their
   // own, where the registry lets a person choose. Not a patient, who holds
-  // nothing until the portal exists.
+  // nothing here: /portal answers to a patient's link, not to this table.
   'settings.read': ['doctor', 'pa', 'medicineManager', 'platformAdmin', 'reviewer', 'contentManager'],
   'settings.organisation.update': ['doctor'],
   'settings.platform.update': ['platformAdmin'],

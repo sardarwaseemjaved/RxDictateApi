@@ -51,6 +51,24 @@ export const SETTINGS = {
     lockable: true,
     organisationAction: 'drugList.clinic.manage',
   }),
+  /** Whether this clinic's patients can link and see their records at all. Off means links stay and serve nothing. */
+  'portal.enabled': setting({
+    schema: z.boolean(),
+    default: false,
+    setBy: ['platform', 'organisation'],
+    lockable: true,
+  }),
+  /**
+   * How invites go out, since an SMS costs money:
+   * - `manual`: only when staff send one;
+   * - `auto`: also after a patient's first approved prescription, once per patient.
+   */
+  'portal.invites': setting({
+    schema: z.enum(['auto', 'manual']),
+    default: 'manual',
+    setBy: ['platform', 'organisation'],
+    lockable: true,
+  }),
 };
 
 export type SettingKey = keyof typeof SETTINGS;

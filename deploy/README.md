@@ -164,6 +164,9 @@ PUBLIC_API_URL=https://api.yourclinic.pk
 # app's public /v page. Printed on paper that is kept for months, so set it to
 # the address the web app will keep.
 VERIFY_BASE_URL=https://app.yourclinic.pk/v
+# Required in production. What an invite's SMS links to: the web app's public
+# /i page, which tells a patient how to get the app.
+INVITE_BASE_URL=https://app.yourclinic.pk/i
 
 STT_PROVIDER=openai
 LLM_PROVIDER=openai

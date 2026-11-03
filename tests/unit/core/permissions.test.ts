@@ -63,7 +63,7 @@ describe('The permissions table', () => {
     });
   });
 
-  test('a patient holds nothing until the portal exists', () => {
+  test('a patient holds nothing: /portal answers to a link, not to this table', () => {
     expect(actionsFor('patient')).toEqual([]);
   });
 
@@ -71,6 +71,18 @@ describe('The permissions table', () => {
     actionsFor('pa').forEach((action) => {
       expect(can('doctor', action)).toBe(true);
     });
+  });
+
+  describe("a patient's online access", () => {
+    test.each(['patient.portal.read', 'patient.portal.invite', 'patient.portal.manage'] as const)(
+      '%s is the doctor and the assistant, and nobody else',
+      (action) => {
+        expect(can('doctor', action)).toBe(true);
+        expect(can('pa', action)).toBe(true);
+        expect(can('medicineManager', action)).toBe(false);
+        expect(can('patient', action)).toBe(false);
+      },
+    );
   });
 
   describe('medicines', () => {

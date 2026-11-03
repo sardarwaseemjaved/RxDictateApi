@@ -40,6 +40,9 @@ const router = express.Router();
  * clinics only - resolvePractice refuses any other kind - except /settings,
  * which any member of any organisation may use.
  *
+ * /portal is outside that rule too: it needs sign-in and no X-Practice-Id,
+ * because a patient is not a member of anything.
+ *
  * Two more are outside that rule, and outside sign-in altogether: /verify,
  * which a pharmacist reaches by scanning a printout, and /files below, where a
  * signed link is the credential.
@@ -65,9 +68,9 @@ const routes = [
   { path: '/settings', route: settingsRoute },
   // Public: a printout's QR code. No sign-in and no X-Practice-Id.
   { path: '/verify', route: verifyRoute },
-  // Not built yet; mounted so the app can link to them.
-  { path: '/devices', route: deviceRoute },
   { path: '/portal', route: portalRoute },
+  // Not built yet; mounted so the app can link to it.
+  { path: '/devices', route: deviceRoute },
 ];
 
 routes.forEach((route) => {

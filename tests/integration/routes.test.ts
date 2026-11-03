@@ -60,6 +60,8 @@ const BUILT: Route[] = [
     body: { name: 'Viral fever', sections: { advice: [{ id: 'a', text: 'Fluids' }] } },
   },
 
+  { method: 'get', path: '/api/v1/portal/links' },
+
   { method: 'get', path: '/api/v1/settings' },
   { method: 'patch', path: '/api/v1/settings/me', body: { values: [{ key: 'medicines.source', value: 'all' }] } },
   {
@@ -70,10 +72,7 @@ const BUILT: Route[] = [
 ];
 
 /** Mounted now, answering 501, so nothing is renamed when they go live. */
-const NOT_IMPLEMENTED: Route[] = [
-  { method: 'post', path: '/api/v1/devices', body: { pushToken: 'abc', platform: 'ios' } },
-  { method: 'get', path: '/api/v1/portal/anything' },
-];
+const NOT_IMPLEMENTED: Route[] = [{ method: 'post', path: '/api/v1/devices', body: { pushToken: 'abc', platform: 'ios' } }];
 
 describe('Every route in the product responds', () => {
   let doctor: SignedIn;

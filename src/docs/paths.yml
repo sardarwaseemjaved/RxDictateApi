@@ -663,6 +663,235 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: ALREADY_MEMBER }
 
+  /portal/links/preview:
+    post:
+      tags: [Portal]
+      summary: See whose record a code points at, changing nothing
+      description: |
+        Sign-in and no X-Practice-Id. Checks everything linking would: the signed-in phone equals
+        the record's, the code is valid, the clinic's portal is on, and the record isn't blocked,
+        deleted or linked to somebody else. A phone match alone never links anything.
+
+        Every failure is the same PORTAL_LINK_FAILED, so nothing says whether a record exists.
+        Shares PORTAL_LINK_RATE_LIMIT_MAX tries a minute per person with POST /portal/links.
+
+        Body portalLinkBodySchema (src/shared/portal.schema.ts): `kind` is `invite` or `prescription`,
+        and `code` is an invite's code, or the verification code of an approved or superseded
+        prescription. Answers portalLinkPreviewSchema: the clinic's name, and the patient's name,
+        age and sex.
+      responses:
+        '200': { description: 'Whose record it is' }
+        '400': { description: 'PORTAL_LINK_FAILED, or VALIDATION_ERROR for a missing kind or code' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { description: RATE_LIMITED }
+  /portal/links:
+    post:
+      tags: [Portal]
+      summary: Link a patient record to this account
+      description: |
+        The same body and checks as the preview. 201 for a new link. 200 when it was already this
+        person's, or when a new code revived their dormant link. Using an invite consumes it. A link
+        is not a membership and gives no clinic rights.
+      responses:
+        '200': { description: 'Already theirs, or revived: portalLinkViewSchema' }
+        '201': { description: 'A new link: portalLinkViewSchema' }
+        '400': { description: 'PORTAL_LINK_FAILED, or VALIDATION_ERROR for a missing kind or code' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { description: RATE_LIMITED }
+    get:
+      tags: [Portal]
+      summary: This person's links
+      description: |
+        Each with the patient, the clinic and a status: `active`; `dormant`, unused for 180 days and
+        needing a new code; or `unavailable`, the clinic's portal being off, which turning it on
+        restores. Removed links aren't listed.
+      responses:
+        '200': { description: 'A list of portalLinkViewSchema' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /portal/links/{linkId}:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    delete:
+      tags: [Portal]
+      summary: Remove your own link
+      description: Works on a dormant or unavailable link too. Someone else's, or one already removed, is NOT_FOUND.
+      responses:
+        '200': { description: '{ removed: true }' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/prescriptions:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: This record's approved and superseded prescriptions, newest first
+      description: |
+        Paged. Never a draft or a cancelled one. A superseded one has `replacedBy`, naming the approved
+        version that stands now. On this and every route under a link: someone else's or a removed link
+        is NOT_FOUND, and the caller's own that can't serve right now (dormant, or the portal off) is
+        PORTAL_LINK_UNAVAILABLE.
+      responses:
+        '200': { description: 'A page of portalPrescriptionListItemSchema' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/prescriptions/{id}:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: One prescription as printed
+      description: From the letterhead snapshot, with its verification code. No edit log, flags, spans or internal ids.
+      responses:
+        '200': { description: portalPrescriptionViewSchema }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/prescriptions/{id}/pdf:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: A short-lived link to the print file
+      responses:
+        '200': { description: portalFileLinkSchema }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/reports:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: This record's reports
+      responses:
+        '200': { description: 'A page of portalReportViewSchema' }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Portal]
+      summary: File a report the patient has uploaded
+      description: |
+        Step two: the pages are already in storage. Lands in the clinic's inbox unreviewed, with
+        `source: 'patient'`, and reaches staff through the `reports` topic. Each `pageKeys` value must be
+        one issued to this link by POST .../uploads; any other is VALIDATION_ERROR. On the staff view,
+        `uploadedBy` is the account holding the link, which is not a member of the clinic.
+      responses:
+        '201': { description: portalReportViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/reports/{id}:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: One report, with a short-lived link per page
+      responses:
+        '200': { description: portalReportDetailViewSchema }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/uploads:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    post:
+      tags: [Portal]
+      summary: Somewhere to PUT one page
+      description: Step one of an upload, with the limits in REPORT_UPLOAD. The key it answers with is good for this link alone.
+      responses:
+        '201': { description: uploadTicketSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/appointments:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: This record's appointments
+      parameters:
+        - { in: query, name: when, schema: { type: string, enum: [upcoming, past] }, description: 'Left out, both, newest first. upcoming runs soonest first.' }
+        - { in: query, name: includeCancelled, schema: { type: string, enum: ['true', 'false'], default: 'false' } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A page of portalAppointmentViewSchema' }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/follow-ups:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: When the doctor asked this patient back
+      responses:
+        '200': { description: 'A page of portalFollowUpViewSchema' }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /portal/links/{linkId}/vitals:
+    parameters:
+      - { in: path, name: linkId, required: true, schema: { type: string } }
+    get:
+      tags: [Portal]
+      summary: Readings over time, from finished visits, newest first
+      responses:
+        '200': { description: 'A page of portalVitalsViewSchema' }
+        '403': { description: PORTAL_LINK_UNAVAILABLE }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /patients/{id}/portal:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Patients]
+      summary: A patient's online access, as the clinic sees it
+      description: |
+        patientPortalViewSchema: `status` is none, invited, linked or dormant, with `invitedAt`, `linkedAt`,
+        `blocked`, and `available`, which says the clinic's portal is on and the record has a phone. Never says
+        which account holds the link. Doctor and assistant; a patient outside an assistant's locations is
+        NOT_FOUND, and a medicine manager is FORBIDDEN.
+      responses:
+        '200': { description: patientPortalViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Patients]
+      summary: Don't share online
+      description: |
+        `{ blocked: boolean }`. Turning it on ends any link and any unused invite. Turning it off brings neither
+        back: the patient needs a code again.
+      responses:
+        '200': { description: patientPortalViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /patients/{id}/portal/invite:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      tags: [Patients]
+      summary: Send an invite by SMS
+      description: |
+        A one-time code, expiring after 30 days, replacing any before it. The SMS links at
+        {INVITE_BASE_URL}/{code}, and names the clinic and the doctor, never the patient, a medicine or a
+        diagnosis. The code is never in a response. A failed SMS doesn't fail this.
+      responses:
+        '200': { description: patientPortalViewSchema }
+        '400': { description: 'VALIDATION_ERROR: the record has no phone' }
+        '403': { description: 'FEATURE_DISABLED: the portal is off. FORBIDDEN: a medicine manager' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'CONFLICT: blocked, or already linked' }
+        '429': { description: 'PORTAL_INVITE_TOO_SOON: one per record per 24 hours. details.retryAt says when' }
+  /patients/{id}/portal/link:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    delete:
+      tags: [Patients]
+      summary: Remove the patient's link
+      description: Nothing to remove answers the same, so a double tap isn't an error.
+      responses:
+        '200': { description: patientPortalViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /verify/{code}:
     parameters:
       - in: path

@@ -1,6 +1,6 @@
 import express from 'express';
-import { patientController, reportController } from '../../controllers';
-import { patientValidation, reportValidation } from '../../validations';
+import { patientController, portalController, reportController } from '../../controllers';
+import { patientValidation, portalValidation, reportValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
 import { resolveLocationIfSent, resolvePractice } from '../../core/tenancy';
@@ -89,6 +89,47 @@ router.get(
   requireCan('report.read'),
   validate(reportValidation.listReports),
   reportController.listReports,
+);
+
+/**
+ * A patient's online access, as the clinic sees and controls it. The doctor's
+ * and an assistant's, within what each may see of the patient, because a patient
+ * may well ask at the front desk.
+ */
+router.get(
+  '/:id/portal',
+  requireAuth,
+  resolvePractice,
+  requireCan('patient.portal.read'),
+  validate(portalValidation.patientPortal),
+  portalController.getPatientPortal,
+);
+
+router.post(
+  '/:id/portal/invite',
+  requireAuth,
+  resolvePractice,
+  requireCan('patient.portal.invite'),
+  validate(portalValidation.patientPortal),
+  portalController.sendPatientInvite,
+);
+
+router.patch(
+  '/:id/portal',
+  requireAuth,
+  resolvePractice,
+  requireCan('patient.portal.manage'),
+  validate(portalValidation.updatePatientPortal),
+  portalController.updatePatientPortal,
+);
+
+router.delete(
+  '/:id/portal/link',
+  requireAuth,
+  resolvePractice,
+  requireCan('patient.portal.manage'),
+  validate(portalValidation.patientPortal),
+  portalController.removePatientLink,
 );
 
 export default router;

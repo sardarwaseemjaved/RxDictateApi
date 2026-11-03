@@ -61,6 +61,12 @@ export const sendOtp = async (phone: string, code: string): Promise<void> => {
   );
 };
 
+/** A doctor who has already typed "Dr" into their name should not be Dr Dr. */
+const asDoctor = (name: string): string => {
+  const trimmed = name.trim();
+  return trimmed ? `${/^dr\b\.?/i.test(trimmed) ? '' : 'Dr. '}${trimmed}` : '';
+};
+
 /**
  * Told to the person who was added, not to the person who added them.
  *
@@ -70,13 +76,30 @@ export const sendOtp = async (phone: string, code: string): Promise<void> => {
  * about the role: that is the clinic's business and not the mobile network's.
  */
 export const sendMemberAdded = async (phone: string, addedByName: string, practiceName: string): Promise<void> => {
-  // A doctor who has already typed "Dr" into their name should not be Dr Dr.
-  const addedBy = addedByName.trim();
-  const who = addedBy ? `${/^dr\b\.?/i.test(addedBy) ? '' : 'Dr. '}${addedBy}` : '';
+  const who = asDoctor(addedByName);
 
   const opening = who ? `${who} added you to ${practiceName}.` : `You have been added to ${practiceName}.`;
 
   await sendQuietly(phone, `${opening} Install ${config.sms.appName} and sign in with this number.`, 'member invitation');
 };
 
-export default { provider, sendOtp, sendMemberAdded };
+/**
+ * An invite to see a record online. Names the clinic and the doctor, and never
+ * the patient, a medicine or a diagnosis: a phone is often the whole family's,
+ * and a message on it is read by whoever picks it up.
+ */
+export const sendPortalInvite = async (
+  phone: string,
+  doctorName: string,
+  practiceName: string,
+  link: string,
+  hasPrescription: boolean,
+): Promise<void> => {
+  const who = asDoctor(doctorName);
+  const from = who ? `${who} at ${practiceName}` : practiceName;
+  const what = hasPrescription ? 'your prescription is ready to view' : 'you can now view your records online';
+
+  await sendQuietly(phone, `${from}: ${what}. Get ${config.sms.appName} and sign in with this number: ${link}`, 'invite');
+};
+
+export default { provider, sendOtp, sendMemberAdded, sendPortalInvite };

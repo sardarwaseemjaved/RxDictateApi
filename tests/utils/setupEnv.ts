@@ -16,6 +16,7 @@ process.env.AUTH_RATE_LIMIT_MAX = process.env.AUTH_RATE_LIMIT_MAX ?? '100000';
 process.env.OTP_RATE_LIMIT_MAX = process.env.OTP_RATE_LIMIT_MAX ?? '100000';
 process.env.LOGOUT_RATE_LIMIT_MAX = process.env.LOGOUT_RATE_LIMIT_MAX ?? '100000';
 process.env.VERIFY_RATE_LIMIT_MAX = process.env.VERIFY_RATE_LIMIT_MAX ?? '100000';
+process.env.PORTAL_LINK_RATE_LIMIT_MAX = process.env.PORTAL_LINK_RATE_LIMIT_MAX ?? '100000';
 
 process.env.STORAGE_DRIVER = process.env.STORAGE_DRIVER ?? 'local';
 process.env.STORAGE_LOCAL_DIR = process.env.STORAGE_LOCAL_DIR ?? '.storage/test';

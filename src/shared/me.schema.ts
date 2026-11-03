@@ -20,5 +20,7 @@ export const meViewSchema = z.object({
   /** What this person practises. Theirs, not a clinic's, so it is the same in every clinic they belong to. */
   specialties: z.array(specialtySchema),
   memberships: z.array(membershipViewSchema),
+  /** How many records this person has linked, so an app with no memberships knows to open the patient's area. */
+  portalLinks: z.number().int().min(0),
 });
 export type MeView = z.infer<typeof meViewSchema>;

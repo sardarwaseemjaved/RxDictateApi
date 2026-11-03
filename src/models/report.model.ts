@@ -1,6 +1,6 @@
 import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
 import { paginate, toJSON, type PaginateModel } from './plugins';
-import type { ReportType } from '../shared/report.schema';
+import type { ReportSource, ReportType } from '../shared/report.schema';
 
 /**
  * A lab sheet, a scan or an old prescription, attached to a patient.
@@ -19,7 +19,12 @@ export interface IReport {
   /** The day the test was done, `YYYY-MM-DD`, which is rarely the upload day. */
   testDate: string;
   pageKeys: string[];
+  /**
+   * Who filed it: a member of staff, or for `source: 'patient'` the account
+   * holding the patient's link. Always a user, never necessarily a member.
+   */
   uploadedBy: Types.ObjectId;
+  source: ReportSource;
   /** Null until the doctor has looked at it. */
   reviewedAt: Date | null;
   reviewedBy: Types.ObjectId | null;
@@ -41,6 +46,7 @@ const reportSchema = new Schema<IReport>(
     testDate: { type: String, required: true },
     pageKeys: { type: [String], default: [] },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    source: { type: String, enum: ['clinic', 'patient'], default: 'clinic' },
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },

@@ -23,7 +23,7 @@ import { wireSections } from './prescriptionOps.service';
  */
 
 /** 16 random bytes in base64url: 22 characters. */
-const CODE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+export const CODE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 
 /**
  * A new code, made at approval. Random rather than derived from the id or the
@@ -77,7 +77,7 @@ const MAX_REVISIONS = 50;
  * any revisions approved in between, because that is the page the patient
  * should be holding. Null if the chain is broken.
  */
-const replacementOf = async (superseded: PrescriptionDoc): Promise<PrescriptionDoc | null> => {
+export const replacementOf = async (superseded: PrescriptionDoc): Promise<PrescriptionDoc | null> => {
   let current = superseded;
   for (let hop = 0; hop < MAX_REVISIONS; hop += 1) {
     // eslint-disable-next-line no-await-in-loop

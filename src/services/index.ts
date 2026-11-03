@@ -12,6 +12,8 @@ export * as patientService from './patient.service';
 export * as pdfService from './pdf.service';
 export * as prescriptionOpsService from './prescriptionOps.service';
 export * as prescriptionService from './prescription.service';
+export * as patientPortalService from './patientPortal.service';
+export * as portalService from './portal.service';
 export * as practiceService from './practice.service';
 export * as reportService from './report.service';
 export * as sessionService from './session.service';

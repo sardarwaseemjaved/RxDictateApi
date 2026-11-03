@@ -27,6 +27,7 @@ import type {
 import { escapeRegex } from '../utils/regex';
 import { addDays, ageFromDob, karachiDay, todayInKarachi } from '../utils/time';
 import { nextMrNo } from './counter.service';
+import { endPortalAccess } from './patientLink.service';
 
 const patients = new BaseRepository<IPatient>(Patient);
 
@@ -403,6 +404,7 @@ export const createPatient = async (scope: Scope, body: CreatePatientBody): Prom
 export const updatePatient = async (scope: Scope, id: string, patch: UpdatePatientBody): Promise<PatientView> => {
   const patient = await findPatientOrFail(scope, id);
   const before = toPatientView(patient);
+  const phoneChanged = patch.phone !== undefined && patch.phone !== patient.phone;
 
   if (patch.name !== undefined) patient.name = patch.name;
   if (patch.phone !== undefined) patient.phone = patch.phone;
@@ -434,6 +436,10 @@ export const updatePatient = async (scope: Scope, id: string, patch: UpdatePatie
   const after = toPatientView(patient);
 
   await writeAudit(scope, { action: 'patient.update', entity: 'patient', entityId: patient._id, before, after });
+  // The phone is half of what a link rests on, so the proof has gone at once.
+  if (phoneChanged) {
+    await endPortalAccess(scope, patient._id, 'phoneChanged');
+  }
   emit('patient.updated', { practiceId: scope.practiceId, patientId: patient._id, actorId: scope.actorId });
   return after;
 };

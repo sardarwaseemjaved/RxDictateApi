@@ -28,6 +28,7 @@ export const toReportView = (report: ReportDoc): ReportView => ({
   testDate: report.testDate,
   pages: report.pageKeys.length,
   uploadedBy: String(report.uploadedBy),
+  source: report.source,
   reviewedAt: report.reviewedAt,
   reviewedBy: report.reviewedBy ? String(report.reviewedBy) : null,
   createdAt: report.createdAt,
@@ -60,6 +61,35 @@ const assertOwnKeys = (scope: Scope, pageKeys: string[]): void => {
   }
 };
 
+/**
+ * Into the clinic's inbox, unreviewed, whoever filed it. The caller has already
+ * said this patient and these pages are theirs to file. `uploadedBy` is the
+ * scope's actor: a member of staff, or the account holding a patient's link.
+ */
+export const fileReport = async (
+  scope: Scope,
+  patientId: Types.ObjectId,
+  fields: Pick<IReport, 'visitId' | 'type' | 'testName' | 'testDate' | 'pageKeys' | 'source'>,
+): Promise<ReportDoc> => {
+  const report = await reports.create(scope, {
+    ...fields,
+    patientId,
+    uploadedBy: scope.actorId,
+    reviewedAt: null,
+    reviewedBy: null,
+  });
+
+  await writeAudit(scope, {
+    action: 'report.create',
+    entity: 'report',
+    entityId: report._id,
+    after: toReportView(report),
+  });
+  emit('report.uploaded', { practiceId: scope.practiceId, patientId, reportId: report._id, actorId: scope.actorId });
+
+  return report;
+};
+
 export const createReport = async (scope: Scope, patientId: string, body: CreateReportBody): Promise<ReportView> => {
   const patient = await findPatientOrFail(scope, patientId);
 
@@ -72,28 +102,16 @@ export const createReport = async (scope: Scope, patientId: string, body: Create
 
   assertOwnKeys(scope, body.pageKeys);
 
-  const report = await reports.create(scope, {
-    patientId: patient._id,
-    visitId: body.visitId ? new Types.ObjectId(body.visitId) : null,
-    type: body.type,
-    testName: body.testName,
-    testDate: body.testDate,
-    pageKeys: body.pageKeys,
-    uploadedBy: scope.actorId,
-    reviewedAt: null,
-    reviewedBy: null,
-  });
-
-  const after = toReportView(report);
-  await writeAudit(scope, { action: 'report.create', entity: 'report', entityId: report._id, after });
-  emit('report.uploaded', {
-    practiceId: scope.practiceId,
-    patientId: patient._id,
-    reportId: report._id,
-    actorId: scope.actorId,
-  });
-
-  return after;
+  return toReportView(
+    await fileReport(scope, patient._id, {
+      visitId: body.visitId ? new Types.ObjectId(body.visitId) : null,
+      type: body.type,
+      testName: body.testName,
+      testDate: body.testDate,
+      pageKeys: body.pageKeys,
+      source: 'clinic',
+    }),
+  );
 };
 
 export const listReports = async (

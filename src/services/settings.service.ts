@@ -12,6 +12,7 @@ import {
   type SettingKey,
   type SettingLayer,
   type SettingSource,
+  type SettingValue,
   type SettingsPatch,
   type SettingsView,
 } from '../shared/settings';
@@ -85,6 +86,25 @@ const viewFrom = (rows: SettingDoc[]): SettingsView =>
 
 /** GET /settings: every key, as it applies to this person in this organisation. */
 export const getSettings = async (scope: Scope): Promise<SettingsView> => viewFrom(await rowsFor(whoFrom(scope)));
+
+/**
+ * What applies to a whole clinic, for when nobody in it is asking: a patient
+ * opening a record, or an approval deciding whether to send an invite. Only for
+ * a key no person sets for themselves.
+ */
+export const organisationSetting = async <K extends SettingKey>(
+  organisationId: Types.ObjectId,
+  key: K,
+): Promise<SettingValue<K>> => {
+  const rows = await Setting.find({
+    key,
+    $or: [
+      { layer: 'platform', organisationId: null, userId: null },
+      { layer: 'organisation', organisationId, userId: null },
+    ],
+  });
+  return resolve(rows, key).value as SettingValue<K>;
+};
 
 const LOCKED_BY: Record<SettingLayer, string> = {
   platform: 'is locked by RxDictate',
@@ -206,4 +226,4 @@ export const updatePlatformSettings = async (
   patch: SettingsPatch,
 ): Promise<SettingsView> => write(scope, 'platform', patch);
 
-export default { getSettings, updateUserSettings, updateOrganisationSettings, updatePlatformSettings };
+export default { getSettings, organisationSetting, updateUserSettings, updateOrganisationSettings, updatePlatformSettings };

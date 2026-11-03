@@ -5,6 +5,10 @@ import { signedUrlViewSchema } from './voice.schema';
 export const reportTypeSchema = z.enum(['lab', 'imaging', 'old_prescription', 'other']);
 export type ReportType = z.infer<typeof reportTypeSchema>;
 
+/** Who filed it: the clinic's staff, or the patient from their own area. */
+export const reportSourceSchema = z.enum(['clinic', 'patient']);
+export type ReportSource = z.infer<typeof reportSourceSchema>;
+
 /**
  * What the app may upload, as constants rather than prose, so the picker can
  * refuse a file before spending a minute sending it.
@@ -66,7 +70,12 @@ export const reportViewSchema = z.object({
   testDate: dateStringSchema,
   /** How many pages, not the pages themselves. */
   pages: z.number().int().min(1),
+  /**
+   * A user id. With `source: 'patient'` it is the patient's own account, which
+   * is not a member of the clinic, so it won't be found in /members.
+   */
   uploadedBy: objectIdSchema,
+  source: reportSourceSchema,
   /** Null until the doctor has looked at it. Set once, by POST /reports/:id/review. */
   reviewedAt: z.coerce.date().nullable(),
   /** Who marked it reviewed; null alongside reviewedAt. */

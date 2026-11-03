@@ -41,7 +41,11 @@ describe('Settings', () => {
       const view = await settingsOf(doctor);
 
       expect(Object.keys(view)).toEqual(SETTING_KEYS);
-      expect(view).toEqual({ [KEY]: { value: 'myListFirst', source: 'default', locked: false } });
+      expect(view).toEqual(
+        Object.fromEntries(
+          SETTING_KEYS.map((key) => [key, { value: SETTINGS[key].default, source: 'default', locked: false }]),
+        ),
+      );
     });
 
     test("a person's own value beats the clinic's, unless the clinic locked it", async () => {

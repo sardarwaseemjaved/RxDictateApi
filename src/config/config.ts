@@ -81,6 +81,8 @@ const envSchema = z.object({
   LOGOUT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   /** Per minute, per IP, across both public verify routes, so codes cannot be tried in bulk. */
   VERIFY_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(30),
+  /** Per minute, per signed-in person, across both routes that try a code to link a record. */
+  PORTAL_LINK_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
 
   /**
    * Where a printout's QR code points: the web app's public page for checking
@@ -90,6 +92,19 @@ const envSchema = z.object({
    * as unset.
    */
   VERIFY_BASE_URL: z
+    .string()
+    .url()
+    .or(z.literal(''))
+    .optional()
+    .transform((value) => (value === '' ? undefined : value)),
+
+  /**
+   * Where an invite's SMS points: the web app's public page that tells a person
+   * how to get the app, `/i` on the web app. The code is appended to it.
+   * Required in production; in development it is guessed the same way. Blank
+   * reads as unset.
+   */
+  INVITE_BASE_URL: z
     .string()
     .url()
     .or(z.literal(''))
@@ -176,6 +191,11 @@ if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.length === 0) {
  */
 if (env.NODE_ENV === 'production' && !env.VERIFY_BASE_URL) {
   throw new Error('Config validation error: VERIFY_BASE_URL must be set in production');
+}
+
+/** An SMS that links at a guess can't be taken back either. */
+if (env.NODE_ENV === 'production' && !env.INVITE_BASE_URL) {
+  throw new Error('Config validation error: INVITE_BASE_URL must be set in production');
 }
 
 /**
@@ -265,10 +285,15 @@ const config = {
     otpMax: env.OTP_RATE_LIMIT_MAX,
     logoutMax: env.LOGOUT_RATE_LIMIT_MAX,
     verifyMax: env.VERIFY_RATE_LIMIT_MAX,
+    portalLinkMax: env.PORTAL_LINK_RATE_LIMIT_MAX,
   },
   verify: {
     /** No trailing slash; a code is appended as `${baseUrl}/${code}`. */
     baseUrl: (env.VERIFY_BASE_URL ?? `http://${lanAddress() ?? 'localhost'}:5173/v`).replace(/\/+$/, ''),
+  },
+  invite: {
+    /** No trailing slash; a code is appended as `${baseUrl}/${code}`. */
+    baseUrl: (env.INVITE_BASE_URL ?? `http://${lanAddress() ?? 'localhost'}:5173/i`).replace(/\/+$/, ''),
   },
   /** Where a download link should point. */
   publicApiUrl: env.PUBLIC_API_URL ?? `http://${lanAddress() ?? 'localhost'}:${env.PORT}`,

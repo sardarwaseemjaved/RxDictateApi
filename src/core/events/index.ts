@@ -16,6 +16,17 @@ import type { VisitStatus } from '../../shared/visit.schema';
 export interface EventPayloads {
   'patient.added': { practiceId: Types.ObjectId; patientId: Types.ObjectId; actorId: Types.ObjectId };
   'patient.updated': { practiceId: Types.ObjectId; patientId: Types.ObjectId; actorId: Types.ObjectId };
+  /**
+   * A new invite code exists and its SMS has yet to go. The only place the code
+   * is ever held outside that SMS, so nothing may log this payload.
+   */
+  'patient.portalInvited': {
+    practiceId: Types.ObjectId;
+    patientId: Types.ObjectId;
+    phone: string;
+    code: string;
+    actorId: Types.ObjectId;
+  };
   /** On a day's list, by hand or by starting a prescription. Not on a double tap that finds them already there. */
   'visit.added': {
     practiceId: Types.ObjectId;
