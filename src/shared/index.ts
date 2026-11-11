@@ -34,3 +34,5 @@ export * from './notification.schema';
 export * from './realtime.schema';
 export * from './verify.schema';
 export * from './portal.schema';
+export * from './company.schema';
+export * from './submission.schema';

@@ -291,15 +291,25 @@ describe('Settings', () => {
       });
     });
 
-    test('a platform member cannot open the clinic socket: FORBIDDEN, as over HTTP', async () => {
+    test("a platform member opens the platform's own socket, with no location: a locationId sent is ignored", async () => {
       const admin = await aPlatformAdmin('+923002220024');
       const client = await connect(live.url);
       opened.push(client);
 
       client.auth(admin, new Types.ObjectId().toHexString());
+      expect(await client.next((message) => message.type !== 'heartbeat')).toEqual({ type: 'ready' });
+    });
+
+    test("a platform member still cannot open a clinic's socket: NOT_MEMBER, as over HTTP", async () => {
+      const { doctor } = await aClinic('+923002220025');
+      const admin = await aPlatformAdmin('+923002220026');
+      const client = await connect(live.url);
+      opened.push(client);
+
+      client.auth({ ...admin, practiceId: doctor.practiceId }, doctor.locationId);
       const error = await client.next((message) => message.type === 'error');
-      expect(error).toMatchObject({ type: 'error', code: 'FORBIDDEN' });
-      expect(await client.closed).toEqual({ code: 1008, reason: 'FORBIDDEN' });
+      expect(error).toMatchObject({ type: 'error', code: 'NOT_MEMBER' });
+      expect(await client.closed).toEqual({ code: 1008, reason: 'NOT_MEMBER' });
     });
   });
 });

@@ -6,7 +6,9 @@ import { emit } from '../core/events';
 import type { Scope } from '../core/db';
 import type { DrugListItemView, DrugListOwner, ListDrugListQuery, PutDrugListItemBody, Usual } from '../shared/drug.schema';
 import type { PageMeta } from '../shared';
+import type { SubmissionSummary } from '../shared/submissionStatus';
 import { findVisibleDrug, prefixOf, toDrugView } from './drugAccess.service';
+import { latestSubmissionsFor } from './submissionLookup.service';
 
 type Audited = Scope & { requestId?: string | null };
 
@@ -19,11 +21,20 @@ const findList = async (scope: Scope, owner: DrugListOwner): Promise<DrugListDoc
 const itemOn = (list: DrugListDoc | null, drugId: Types.ObjectId | string): IDrugListItem | null =>
   list?.items.find((item) => item.drugId.equals(drugId)) ?? null;
 
-const toItemView = (drug: DrugDoc, item: IDrugListItem): DrugListItemView => ({
+const toItemView = (drug: DrugDoc, item: IDrugListItem, proposal: SubmissionSummary | null = null): DrugListItemView => ({
   drug: toDrugView(drug),
   usual: item.usual,
   addedAt: item.addedAt,
+  proposal,
 });
+
+/** On the clinic's list, the latest proposal about each of these items. A doctor's own list has none. */
+const proposalsFor = async (
+  scope: Scope,
+  owner: DrugListOwner,
+  drugIds: Types.ObjectId[],
+): Promise<Map<string, SubmissionSummary>> =>
+  owner === 'clinic' ? latestSubmissionsFor(scope.practiceId, drugIds, ['drug.propose']) : new Map();
 
 /** Tell whoever the list belongs to. */
 export const announceMedicines = (scope: Scope, owner: DrugListOwner, drugId: Types.ObjectId): void => {
@@ -115,8 +126,10 @@ export const recordAdded = async (
 };
 
 /** The item a drug has on a list, once it is known to be there. */
-export const viewOfItem = async (scope: Scope, owner: DrugListOwner, drug: DrugDoc): Promise<DrugListItemView> =>
-  toItemView(drug, itemOn(await findList(scope, owner), drug._id)!);
+export const viewOfItem = async (scope: Scope, owner: DrugListOwner, drug: DrugDoc): Promise<DrugListItemView> => {
+  const [list, proposals] = await Promise.all([findList(scope, owner), proposalsFor(scope, owner, [drug._id])]);
+  return toItemView(drug, itemOn(list, drug._id)!, proposals.get(String(drug._id)) ?? null);
+};
 
 /** GET /drug-lists/:owner: a page of the list, by brand. Discontinued drugs stay, so their owner can take them off. */
 export const listItems = async (
@@ -133,8 +146,13 @@ export const listItems = async (
     },
     { page: query.page, limit: query.limit, sortBy: 'brandKey:asc,strength:asc,_id:asc' },
   );
+  const proposals = await proposalsFor(
+    scope,
+    owner,
+    result.results.map((drug) => drug._id),
+  );
   return {
-    items: result.results.map((drug) => toItemView(drug, itemOn(list, drug._id)!)),
+    items: result.results.map((drug) => toItemView(drug, itemOn(list, drug._id)!, proposals.get(String(drug._id)) ?? null)),
     meta: { page: result.page, limit: result.limit, total: result.totalResults, totalPages: result.totalPages },
   };
 };

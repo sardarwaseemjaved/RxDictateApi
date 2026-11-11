@@ -1,5 +1,6 @@
 export * as appointmentValidation from './appointment.validation';
 export * as authValidation from './auth.validation';
+export * as companyValidation from './company.validation';
 export * as drugValidation from './drug.validation';
 export * as drugListValidation from './drugList.validation';
 export * as locationValidation from './location.validation';
@@ -11,6 +12,7 @@ export * as practiceValidation from './practice.validation';
 export * as prescriptionValidation from './prescription.validation';
 export * as reportValidation from './report.validation';
 export * as settingsValidation from './settings.validation';
+export * as submissionValidation from './submission.validation';
 export * as teamValidation from './team.validation';
 export * as templateValidation from './template.validation';
 export * as visitValidation from './visit.validation';

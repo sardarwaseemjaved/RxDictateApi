@@ -75,7 +75,8 @@ export class LiveClient {
     this.ws.send(typeof message === 'string' ? message : JSON.stringify(message));
   }
 
-  auth(actor: SignedIn, locationId: string, token = actor.accessToken): void {
+  /** A clinic's socket names a location; a company's or the platform's leaves it out. */
+  auth(actor: SignedIn, locationId?: string, token = actor.accessToken): void {
     this.send({ type: 'auth', token, practiceId: actor.practiceId, locationId });
   }
 
@@ -127,7 +128,7 @@ export const connect = async (url: string, options?: ClientOptions): Promise<Liv
 };
 
 /** A socket signed in as this member at this location, past `ready`. */
-export const signedIn = async (url: string, actor: SignedIn, locationId: string, options?: ClientOptions) => {
+export const signedIn = async (url: string, actor: SignedIn, locationId?: string, options?: ClientOptions) => {
   const client = await connect(url, options);
   client.auth(actor, locationId);
   await client.next((message) => message.type === 'ready');

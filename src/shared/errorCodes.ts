@@ -38,6 +38,13 @@ export const ERROR_CODES = [
   // Team
   'LAST_DOCTOR',
   'ALREADY_MEMBER',
+  'LAST_ADMIN',
+
+  // Organisations
+  'ORGANISATION_SUSPENDED',
+
+  // The review queue
+  'SUBMISSION_WRONG_STATUS',
 
   // Prescriptions
   'RX_LOCKED',
@@ -104,6 +111,14 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
 
   LAST_DOCTOR: 409,
   ALREADY_MEMBER: 409,
+  /** A company or the platform would be left with no admin. Remove another, or add one first. */
+  LAST_ADMIN: 409,
+
+  /** The caller's company is suspended by RxDictate, or a reviewer acted on a suspended company's submission. */
+  ORGANISATION_SUSPENDED: 403,
+
+  /** The submission is not in a state that allows this: approving a withdrawn one, editing a pending one. `details.status` says which. */
+  SUBMISSION_WRONG_STATUS: 409,
 
   RX_LOCKED: 409,
   RX_NOT_DRAFT: 409,

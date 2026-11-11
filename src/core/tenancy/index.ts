@@ -29,6 +29,15 @@ export const CLINIC_ONLY: readonly OrganisationType[] = ['clinic'];
 /** Every kind of organisation, for the routes any member of any of them may use. */
 export const ANY_ORGANISATION: readonly OrganisationType[] = organisationTypeSchema.options;
 
+/** RxDictate's own console: companies and the review queue's decisions. */
+export const PLATFORM_ONLY: readonly OrganisationType[] = ['platform'];
+
+/** A company's own portal: its profile and its products. */
+export const COMPANY_ONLY: readonly OrganisationType[] = ['company'];
+
+/** Whoever sends to the review queue: a company's products, a clinic's proposals. */
+export const SENDERS: readonly OrganisationType[] = ['company', 'clinic'];
+
 /**
  * What this person may do in this practice, with every check resolvePractice
  * makes and no Express: the realtime handshake runs exactly these.
@@ -40,6 +49,9 @@ export const ANY_ORGANISATION: readonly OrganisationType[] = organisationTypeSch
  * `allowed` is the kinds of organisation the route serves. A member of any
  * other kind is FORBIDDEN, after the membership checks, so a stranger still
  * learns nothing about an organisation that is not theirs.
+ *
+ * A suspended company's members are refused here, on every route they could
+ * reach and on the socket, with ORGANISATION_SUSPENDED.
  */
 export const practiceContextFor = async (
   userId: Types.ObjectId,
@@ -74,6 +86,13 @@ export const practiceContextFor = async (
       allowed.length === 1 && allowed[0] === 'clinic'
         ? 'This is only available in a clinic.'
         : 'This is not available here.',
+    );
+  }
+
+  if (practice.status === 'suspended') {
+    throw new AppError(
+      'ORGANISATION_SUSPENDED',
+      `${practice.name} has been suspended by RxDictate. Its products stay live; nothing else can be done until it is reactivated.`,
     );
   }
 

@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
 import type { Types } from 'mongoose';
 import logger from '../../config/logger';
-import type { Role } from '../../shared/roles';
+import type { OrganisationType, Role } from '../../shared/roles';
+import type { SubmissionStatus, SubmissionType } from '../../shared/submissionStatus';
 import type { SettingKey, SettingLayer } from '../../shared/settings';
 import type { VisitStatus } from '../../shared/visit.schema';
 
@@ -81,8 +82,10 @@ export interface EventPayloads {
     version: number;
     actorId: Types.ObjectId;
   };
+  /** `organisationType` decides the wording: a clinic's staff are told about a clinic, a company's about the company. */
   'member.added': {
     practiceId: Types.ObjectId;
+    organisationType: OrganisationType;
     membershipId: Types.ObjectId;
     userId: Types.ObjectId;
     phone: string;
@@ -91,6 +94,7 @@ export interface EventPayloads {
   };
   'member.removed': {
     practiceId: Types.ObjectId;
+    organisationType: OrganisationType;
     membershipId: Types.ObjectId;
     userId: Types.ObjectId;
     actorId: Types.ObjectId;
@@ -175,6 +179,21 @@ export interface EventPayloads {
     | { layer: 'user'; organisationId: Types.ObjectId; userId: Types.ObjectId; keys: SettingKey[]; actorId: Types.ObjectId }
     | { layer: 'organisation'; organisationId: Types.ObjectId; keys: SettingKey[]; actorId: Types.ObjectId }
     | { layer: Extract<SettingLayer, 'platform'>; keys: SettingKey[]; actorId: Types.ObjectId };
+  /**
+   * A submission was sent, sent again, withdrawn or decided. Reaches the
+   * organisation that sent it and the platform's reviewers. `drugId` is what
+   * it is about, so a clinic's list can show a proposal's new status.
+   */
+  'submission.changed': {
+    submissionId: Types.ObjectId;
+    practiceId: Types.ObjectId;
+    type: SubmissionType;
+    status: SubmissionStatus;
+    drugId: Types.ObjectId | null;
+    actorId: Types.ObjectId;
+  };
+  /** RxDictate suspended a company: its members' open apps are closed with ORGANISATION_SUSPENDED. */
+  'organisation.suspended': { practiceId: Types.ObjectId; actorId: Types.ObjectId };
   /**
    * A list or an own item changed. A clinic's reaches everyone in the clinic,
    * and a doctor's own reaches that doctor. `drugId` is what changed.

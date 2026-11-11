@@ -128,7 +128,6 @@ describe('Organisation types', () => {
         ['get', '/api/v1/practice'],
         ['get', '/api/v1/locations'],
         ['post', '/api/v1/locations'],
-        ['get', '/api/v1/members'],
         ['get', '/api/v1/patients'],
         ['post', '/api/v1/patients'],
         ['get', '/api/v1/visits'],
@@ -234,7 +233,8 @@ describe('GET /me', () => {
       practiceName: PLATFORM_NAME,
       organisationType: 'platform',
       role: 'platformAdmin',
-      can: ['settings.read', 'settings.platform.update'],
+      organisationStatus: 'active',
+      can: actionsFor('platformAdmin'),
       locationIds: [],
       locations: [],
     });

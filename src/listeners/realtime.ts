@@ -1,7 +1,7 @@
 import type { Types } from 'mongoose';
 import { on } from '../core/events';
 import { deliver, type Audience } from '../core/realtime';
-import { Patient, Prescription } from '../models';
+import { Patient, Practice, Prescription } from '../models';
 import type { ErrorCode } from '../shared/errorCodes';
 import type { RealtimeTopic } from '../shared/realtime.schema';
 
@@ -87,8 +87,14 @@ on('notification.read', ({ practiceId, userId }) => tell(member(practiceId, user
 /* The team and the locations, to the whole clinic - after closing whatever just lost access. */
 on('member.added', ({ practiceId, membershipId }) => tell(everyone(practiceId), 'team', membershipId));
 
-on('member.removed', ({ practiceId, membershipId, userId }) => {
-  shut(member(practiceId, userId), 'MEMBERSHIP_REMOVED', 'You have been removed from this clinic.');
+on('member.removed', ({ practiceId, organisationType, membershipId, userId }) => {
+  shut(
+    member(practiceId, userId),
+    'MEMBERSHIP_REMOVED',
+    organisationType === 'clinic'
+      ? 'You have been removed from this clinic.'
+      : 'You have been removed from this organisation.',
+  );
   tell(everyone(practiceId), 'team', membershipId);
 });
 
@@ -145,6 +151,26 @@ on('medicines.changed', (change) => {
     'medicines',
     change.drugId,
   );
+});
+
+/*
+ * The review queue: the organisation that sent it, and the platform's
+ * reviewers. A clinic's proposal also changes what its list shows beside the item.
+ */
+on('submission.changed', async ({ submissionId, practiceId, type, drugId }) => {
+  tell(everyone(practiceId), 'submissions', submissionId);
+  if (type === 'drug.propose' && drugId) {
+    tell(everyone(practiceId), 'medicines', drugId);
+  }
+  const platform = await Practice.findOne({ type: 'platform' }).select('_id');
+  if (platform && !platform._id.equals(practiceId)) {
+    tell(everyone(platform._id), 'submissions', submissionId);
+  }
+});
+
+/* A suspended company's open apps are closed, as its routes now refuse them. */
+on('organisation.suspended', ({ practiceId }) => {
+  shut(everyone(practiceId), 'ORGANISATION_SUSPENDED', 'This company has been suspended by RxDictate.');
 });
 
 /* A session that ended takes its sockets with it. */

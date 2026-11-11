@@ -8,7 +8,8 @@ export interface Identity {
   sessionId: string;
   practiceId: string;
   membershipId: string;
-  locationId: string;
+  /** Null for a company or the platform, which have no locations. */
+  locationId: string | null;
 }
 
 /**
@@ -75,7 +76,9 @@ const bySocket = new Map<WebSocket, Connection>();
 
 export const register = (connection: Connection): void => {
   const { who } = connection;
-  byLocation.add(who.locationId, connection);
+  if (who.locationId) {
+    byLocation.add(who.locationId, connection);
+  }
   byUser.add(who.userId, connection);
   bySession.add(who.sessionId, connection);
   byPractice.add(who.practiceId, connection);
@@ -85,7 +88,9 @@ export const register = (connection: Connection): void => {
 /** Safe to call twice: a socket closed by the server is also reported closed by ws. */
 export const unregister = (connection: Connection): void => {
   const { who } = connection;
-  byLocation.remove(who.locationId, connection);
+  if (who.locationId) {
+    byLocation.remove(who.locationId, connection);
+  }
   byUser.remove(who.userId, connection);
   bySession.remove(who.sessionId, connection);
   byPractice.remove(who.practiceId, connection);

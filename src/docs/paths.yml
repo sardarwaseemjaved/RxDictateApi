@@ -648,13 +648,31 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /members:
+    get:
+      tags: [Team]
+      summary: An organisation's own staff (a clinic's doctor, a company's admin, a platform admin)
+      description: |
+        Serves every kind of organisation; X-Practice-Id says which. A clinic answers exactly as before.
+        A company or the platform answers its own members, with locationIds always empty.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: status, schema: { type: string, enum: [active, removed] } }
+      responses:
+        '200': { description: 'A list of memberViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Team]
-      summary: Add a member by phone number (doctor)
+      summary: Add a member by phone number (doctor, companyAdmin, platformAdmin)
       description: |
-        Body addMemberBodySchema. role is doctor, pa (the default) or medicineManager. locationIds is
-        required, except for a medicine manager, who reaches every location like a doctor and holds only
-        the medicine actions. A medicine manager's role never changes: PATCH /members/{id} refuses it.
+        In a clinic: body addMemberBodySchema. role is doctor, pa (the default) or medicineManager.
+        locationIds is required, except for a medicine manager, who reaches every location like a doctor
+        and holds only the medicine actions. A medicine manager's role never changes.
+
+        In a company or the platform: body addOrganisationMemberBodySchema, with one of that
+        organisation's roles (companyAdmin or companyEditor; platformAdmin, reviewer or contentManager)
+        and no locations. A role from another kind of organisation is VALIDATION_ERROR. The person is
+        told by SMS, naming the organisation. Roles never change: remove the member and add them again.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/PracticeId' }]
       responses:
@@ -662,6 +680,422 @@ paths:
         '400': { description: VALIDATION_ERROR }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: ALREADY_MEMBER }
+
+  /members/{id}:
+    patch:
+      tags: [Team]
+      summary: A clinic member's role between doctor and pa, their locations, or their name (doctor)
+      description: |
+        A clinic's only. A company's or the platform's roles never change, so this is FORBIDDEN there.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The member (memberViewSchema) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: LAST_DOCTOR }
+    delete:
+      tags: [Team]
+      summary: Remove a member (doctor, companyAdmin, platformAdmin)
+      description: |
+        Sets the membership to removed. A clinic keeps at least one doctor (LAST_DOCTOR); a company or
+        the platform keeps at least one admin (LAST_ADMIN). Another organisation's member is NOT_FOUND.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The member, now removed (memberViewSchema) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: LAST_DOCTOR or LAST_ADMIN }
+
+  /companies:
+    get:
+      tags: [Companies]
+      summary: Medicine companies, paged (platformAdmin, reviewer)
+      description: |
+        The platform organisation only. By name; q matches anywhere in the name, ignoring case.
+        meta is { page, limit, total, totalPages }.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: status, schema: { type: string, enum: [active, suspended] } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of companyViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Companies]
+      summary: Make a company and invite its first admin (platformAdmin)
+      description: |
+        Body createCompanyBodySchema. Makes an organisation of type company, and gives admin.phone a
+        companyAdmin membership, making the user if nobody has signed in with that number, and sending
+        an SMS that names the company. That admin then adds the company's own staff at /members. One
+        company per SECP registration number: a second is CONFLICT.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example:
+              name: Zenith Labs
+              address: 12 Industrial Estate
+              province: punjab
+              city: Lahore
+              secpRegNo: '0123456'
+              drapLicenceNo: DML-000123
+              contactPhone: '+924235550000'
+              admin: { phone: '+923001234567', name: Hina Shah }
+      responses:
+        '201': { description: The company (companyViewSchema) }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: CONFLICT, the SECP number is another company's }
+
+  /companies/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Companies]
+      summary: One company (platformAdmin, reviewer)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: companyViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Companies]
+      summary: Edit a company's details (platformAdmin)
+      description: Body updateCompanyBodySchema; only what is sent changes. Status changes only through suspend and reactivate.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: companyViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: CONFLICT, the SECP number is another company's }
+
+  /companies/{id}/suspend:
+    post:
+      tags: [Companies]
+      summary: Suspend a company (platformAdmin)
+      description: |
+        Its members are refused on every route, and on the socket, with ORGANISATION_SUSPENDED, and
+        their open apps are closed. Its pending submissions wait: a reviewer cannot decide them until it
+        is reactivated. Its live products stay, because doctors already rely on them. Doing it twice
+        changes nothing.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: companyViewSchema, status suspended }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /companies/{id}/reactivate:
+    post:
+      tags: [Companies]
+      summary: Reactivate a suspended company (platformAdmin)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: companyViewSchema, status active }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /company:
+    get:
+      tags: [Company portal]
+      summary: The caller's own company (companyAdmin, companyEditor)
+      description: X-Practice-Id is the company's id. A suspended company answers ORGANISATION_SUSPENDED here and on every company route.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '200': { description: companyViewSchema }
+        '403': { description: 'FORBIDDEN, or ORGANISATION_SUSPENDED' }
+
+  /company/products:
+    get:
+      tags: [Company portal]
+      summary: The company's live products, each with its latest submission (companyAdmin, companyEditor)
+      description: |
+        Only rows this company owns: its approved products and the DRAP rows it claimed. Never usage,
+        and never who prescribes them. What is still in review is in GET /submissions.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of companyProductViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Company portal]
+      summary: Send a new product for review (drug.create)
+      description: |
+        Body createProductBodySchema: the DRAP importer's columns, with form as one of ours. Nothing is
+        live until a reviewer approves it. A registration number already in the catalog is CONFLICT:
+        details.drugId names the row, and details.claimable says to claim it instead. One already waiting
+        for review is CONFLICT too.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example:
+              { brand: Zentra, composition: Zentramol 250mg, strength: 250mg, form: tab, pack: 10x10, registrationNo: '012345' }
+      responses:
+        '201': { description: 'The submission, as GET /submissions/{id} shows it (submissionDetailViewSchema)' }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: CONFLICT }
+
+  /company/products/claim:
+    post:
+      tags: [Company portal]
+      summary: Claim a DRAP-imported product by its registration number (drug.claim)
+      description: |
+        Body claimProductBodySchema. Approved, the company owns that row: its id, every list holding it
+        and all its usage stay as they are, and its company text becomes the company's name. A row that
+        is already this company's, or another company's, is CONFLICT; a number not in the catalog is
+        NOT_FOUND. The claim takes the row as it is; send changes once it is approved.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: submissionDetailViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: CONFLICT }
+
+  /company/products/csv/check:
+    post:
+      tags: [Company portal]
+      summary: Check a CSV of products, changing nothing
+      description: |
+        Body companyCsvBodySchema: the file's text as csv, in the JSON body (500 rows are far under the
+        API's JSON limit). Columns registrationNo, brand, composition, strength, form, pack, in any
+        order; a company column is ignored. At most 500 rows. Each row says what it would become: new,
+        update (one of this company's products), claim (a DRAP row nobody owns) or unchanged, or its
+        problems. A missing column, no rows, or more than 500 is VALIDATION_ERROR for the whole file.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '200': { description: csvCheckViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /company/products/csv:
+    post:
+      tags: [Company portal]
+      summary: Send a CSV of products, one submission per row
+      description: |
+        The same body and rules as the check. A file with any problem sends nothing (VALIDATION_ERROR,
+        with each row's problems in details). Otherwise each new, update and claim row becomes its own
+        submission, all sharing an uploadId that GET /submissions?uploadId= filters on. Unchanged rows
+        send nothing.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: csvSendViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /company/products/{id}:
+    patch:
+      tags: [Company portal]
+      summary: Send a change to one of the company's products (drug.update)
+      description: |
+        Body updateProductBodySchema; only what is sent, and only what differs, is in the payload. What
+        doctors see stays as it is until it is approved. One change or discontinuation at a time per
+        product (CONFLICT). Another company's product is NOT_FOUND.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '201': { description: submissionDetailViewSchema; current is the live row as it is now }
+        '400': { description: VALIDATION_ERROR, including a change that changes nothing }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: CONFLICT }
+
+  /company/products/{id}/discontinue:
+    post:
+      tags: [Company portal]
+      summary: Send a discontinuation of one of the company's products (drug.discontinue)
+      description: Approved, the product is discontinued, and stays on every list marked so.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '201': { description: submissionDetailViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: CONFLICT, already discontinued or a change is waiting }
+
+  /drugs/{id}/propose:
+    post:
+      tags: [Medicines]
+      summary: Offer one of the clinic's own items to the national catalog (doctor, medicine manager)
+      description: |
+        A drug.propose submission, sent as the item stands now. Nothing changes until a reviewer
+        publishes it (the same id becomes national, so every list keeps it) or merges it into an
+        existing national row (lists and usage move there, and the item is retired as discontinued).
+        Prescriptions never change. A doctor's own row, or another clinic's, is NOT_FOUND. One already
+        open is CONFLICT. GET /drug-lists/clinic shows the latest proposal beside each item.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '201': { description: submissionViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: CONFLICT }
+
+  /submissions:
+    get:
+      tags: [Review]
+      summary: The review queue (reviewer), or the caller's own organisation's submissions (company, clinic)
+      description: |
+        A reviewer sees every organisation's and may filter by organisationId; a company or a clinic sees
+        only its own, and organisationId is ignored. With no status, open ones come first (pending, then
+        changesRequested, then the rest), each oldest sent first. Types are drug.create, drug.update,
+        drug.discontinue, drug.claim and drug.propose.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: status, schema: { type: string, enum: [pending, approved, rejected, changesRequested, withdrawn] } }
+        - in: query
+          name: type
+          schema: { type: string, enum: [drug.create, drug.update, drug.discontinue, drug.claim, drug.propose] }
+        - { in: query, name: organisationId, schema: { type: string } }
+        - { in: query, name: uploadId, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of submissionViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /submissions/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Review]
+      summary: One submission, with the live row to compare it with and, for a reviewer, likely duplicates
+      description: |
+        current is the row as it is now, for an update, discontinuation, claim or proposal. duplicates,
+        for a reviewer only, are national rows with the same registration number, or the same brand,
+        strength and form among active ones. A sender never sees who reviewed (reviewerId and the
+        reviewer's history steps have by null). Another organisation's is NOT_FOUND.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: submissionDetailViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Review]
+      summary: Send one back for changes again, edited (company, clinic)
+      description: |
+        Body resubmitSubmissionBodySchema. Only a changesRequested one; it goes back to pending as the
+        same submission, its history kept. payload replaces the one before and is checked as if sent
+        fresh. A proposal takes no payload: correct the item with PATCH /drugs/{id}, then send this.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: submissionViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: SUBMISSION_WRONG_STATUS, or CONFLICT }
+
+  /submissions/{id}/withdraw:
+    post:
+      tags: [Review]
+      summary: Take back an open submission (company, clinic)
+      description: Pending or changesRequested only. A withdrawn one can never be approved.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: submissionViewSchema }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: SUBMISSION_WRONG_STATUS }
+
+  /submissions/{id}/approve:
+    post:
+      tags: [Review]
+      summary: Approve, which does what the type means (platformAdmin, reviewer)
+      description: |
+        Body approveSubmissionBodySchema. Pending only (SUBMISSION_WRONG_STATUS otherwise, with
+        details.status). A suspended sender's waits (ORGANISATION_SUSPENDED).
+
+        - drug.create: a national, active row, source company, owned by the company and under its name.
+          A registration number in the catalog by now is CONFLICT: reject it as a duplicate instead.
+        - drug.update: the live row changes now.
+        - drug.discontinue: status discontinued.
+        - drug.claim: the company owns the DRAP row; its id, lists and usage are unchanged.
+        - drug.propose: decision is required. publish makes the clinic's row national with the same id.
+          merge needs intoDrugId, an active national row: the clinic's and its doctors' list items and
+          usage move there, and the clinic's row is discontinued, pointing at it. Prescriptions never change.
+
+        If carrying it out fails, it stays pending.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            example: { decision: merge, intoDrugId: 6540000000000000000000aa }
+      responses:
+        '200': { description: submissionViewSchema, with resultDrugId }
+        '400': { description: VALIDATION_ERROR }
+        '403': { description: 'FORBIDDEN, or ORGANISATION_SUSPENDED' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'SUBMISSION_WRONG_STATUS, or CONFLICT when the row has changed since it was sent' }
+
+  /submissions/{id}/reject:
+    post:
+      tags: [Review]
+      summary: Reject, with a note the sender reads (platformAdmin, reviewer)
+      description: |
+        Body rejectSubmissionBodySchema; note is required. On a new product already in the catalog,
+        duplicateOfId names that national row, so the company can claim it instead.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: submissionViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { description: 'FORBIDDEN, or ORGANISATION_SUSPENDED' }
+        '409': { description: SUBMISSION_WRONG_STATUS }
+
+  /submissions/{id}/request-changes:
+    post:
+      tags: [Review]
+      summary: Send it back to be edited, with a note the sender reads (platformAdmin, reviewer)
+      description: Body requestChangesBodySchema; note is required.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: submissionViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { description: 'FORBIDDEN, or ORGANISATION_SUSPENDED' }
+        '409': { description: SUBMISSION_WRONG_STATUS }
 
   /portal/links/preview:
     post:

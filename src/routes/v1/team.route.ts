@@ -1,17 +1,37 @@
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import { teamController } from '../../controllers';
 import { teamValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
-import { resolvePractice } from '../../core/tenancy';
+import { ANY_ORGANISATION, resolveOrganisation, resolvePractice } from '../../core/tenancy';
 import { requireCan } from '../../core/permissions';
 
 const router = express.Router();
 
+/**
+ * Each organisation's own staff, for every kind: a clinic's doctors, assistants
+ * and medicine managers, a company's admins and editors, and RxDictate's own.
+ * The tenancy check is the same one every route mounts - here it serves every
+ * kind - and the permissions table says who runs each: a doctor, a
+ * companyAdmin, a platformAdmin.
+ *
+ * A clinic's requests and answers are exactly what they were. A company or the
+ * platform adds by phone with one of its own roles and no locations, and a
+ * role never changes, so PATCH stays a clinic's.
+ */
+
+// A clinic's body has locations; everyone else's has none.
+const validateAdd: RequestHandler = (req, res, next) =>
+  validate(req.ctx?.organisationType === 'clinic' ? teamValidation.addMember : teamValidation.addOrganisationMember)(
+    req,
+    res,
+    next,
+  );
+
 router.get(
   '/',
   requireAuth,
-  resolvePractice,
+  resolveOrganisation(ANY_ORGANISATION),
   requireCan('member.read'),
   validate(teamValidation.listMembers),
   teamController.listMembers,
@@ -21,9 +41,9 @@ router.get(
 router.post(
   '/',
   requireAuth,
-  resolvePractice,
+  resolveOrganisation(ANY_ORGANISATION),
   requireCan('member.add'),
-  validate(teamValidation.addMember),
+  validateAdd,
   teamController.addMember,
 );
 
@@ -40,7 +60,7 @@ router.patch(
 router.delete(
   '/:id',
   requireAuth,
-  resolvePractice,
+  resolveOrganisation(ANY_ORGANISATION),
   requireCan('member.remove'),
   validate(teamValidation.removeMember),
   teamController.removeMember,

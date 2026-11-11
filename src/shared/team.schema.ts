@@ -47,3 +47,15 @@ export const listMembersQuerySchema = z.object({
   status: membershipStatusSchema.optional(),
 });
 export type ListMembersQuery = z.infer<typeof listMembersQuerySchema>;
+
+/**
+ * `POST /members` from a company or from the platform: a person by phone, with
+ * one of that organisation's roles. No locations: only a clinic has them. A
+ * role never changes once given; remove the member and add them again.
+ */
+export const addOrganisationMemberBodySchema = z.object({
+  phone: phoneSchema,
+  name: z.string().trim().min(1).max(120).optional(),
+  role: roleSchema.extract(['companyAdmin', 'companyEditor', 'platformAdmin', 'reviewer', 'contentManager']),
+});
+export type AddOrganisationMemberBody = z.infer<typeof addOrganisationMemberBodySchema>;

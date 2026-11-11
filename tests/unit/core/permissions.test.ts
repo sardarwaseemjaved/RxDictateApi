@@ -95,7 +95,7 @@ describe('The permissions table', () => {
 
     test('a medicine manager gets exactly this and nothing else', () => {
       expect([...actionsFor('medicineManager')].sort()).toEqual(
-        ['drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
+        ['drug.propose', 'drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
       );
     });
 
@@ -112,7 +112,7 @@ describe('The permissions table', () => {
 
   describe('settings and the platform', () => {
     test('everybody who works somewhere reads settings; a patient still holds nothing', () => {
-      ['doctor', 'pa', 'platformAdmin', 'reviewer', 'contentManager'].forEach((role) => {
+      ['doctor', 'pa', 'platformAdmin', 'reviewer', 'contentManager', 'companyAdmin', 'companyEditor'].forEach((role) => {
         expect(can(role as 'doctor', 'settings.read')).toBe(true);
       });
       expect(can('patient', 'settings.read')).toBe(false);
@@ -124,18 +124,55 @@ describe('The permissions table', () => {
       expect(roleSchema.options.filter((role) => can(role, 'settings.platform.update'))).toEqual(['platformAdmin']);
     });
 
-    test("the platform's roles hold none of a clinic's actions", () => {
-      expect(actionsFor('platformAdmin')).toEqual(['settings.read', 'settings.platform.update']);
-      expect(actionsFor('reviewer')).toEqual(['settings.read']);
+    test("the platform's roles hold none of a clinic's actions: their own staff, companies, the queue and settings", () => {
+      expect([...actionsFor('platformAdmin')].sort()).toEqual(
+        [
+          'member.read',
+          'member.add',
+          'member.remove',
+          'settings.read',
+          'settings.platform.update',
+          'company.read',
+          'company.create',
+          'company.update',
+          'company.suspend',
+          'submission.review',
+        ].sort(),
+      );
+      expect([...actionsFor('reviewer')].sort()).toEqual(['company.read', 'settings.read', 'submission.review'].sort());
       expect(actionsFor('contentManager')).toEqual(['settings.read']);
     });
 
-    test('every role belongs to exactly one kind of organisation, and a company has none yet', () => {
+    test('a reviewer cannot make, change or suspend a company, or manage staff', () => {
+      (['company.create', 'company.update', 'company.suspend', 'member.add', 'member.remove'] as const).forEach((action) => {
+        expect({ action, allowed: can('reviewer', action) }).toEqual({ action, allowed: false });
+      });
+    });
+
+    test("a company's roles send products and nothing of a clinic's; only its admin manages staff", () => {
+      expect([...actionsFor('companyEditor')].sort()).toEqual(
+        ['company.profile.read', 'drug.submit', 'settings.read'].sort(),
+      );
+      expect([...actionsFor('companyAdmin')].sort()).toEqual(
+        ['company.profile.read', 'drug.submit', 'member.add', 'member.read', 'member.remove', 'settings.read'].sort(),
+      );
+      expect(can('companyAdmin', 'member.update')).toBe(false);
+      expect(can('companyAdmin', 'drug.search')).toBe(false);
+      expect(can('companyAdmin', 'submission.review')).toBe(false);
+    });
+
+    test('only a clinic proposes, only a company submits, only the platform reviews', () => {
+      expect(roleSchema.options.filter((role) => can(role, 'drug.propose'))).toEqual(['doctor', 'medicineManager']);
+      expect(roleSchema.options.filter((role) => can(role, 'drug.submit'))).toEqual(['companyAdmin', 'companyEditor']);
+      expect(roleSchema.options.filter((role) => can(role, 'submission.review'))).toEqual(['platformAdmin', 'reviewer']);
+    });
+
+    test('every role belongs to exactly one kind of organisation', () => {
       roleSchema.options.forEach((role) => {
         const holders = Object.values(ROLES_BY_ORGANISATION_TYPE).filter((roles) => roles.includes(role));
         expect({ role, kinds: holders.length }).toEqual({ role, kinds: 1 });
       });
-      expect(ROLES_BY_ORGANISATION_TYPE.company).toEqual([]);
+      expect(ROLES_BY_ORGANISATION_TYPE.company).toEqual(['companyAdmin', 'companyEditor']);
     });
   });
 });

@@ -21,6 +21,9 @@ import reportRoute from './report.route';
 import appointmentRoute from './appointment.route';
 import followUpRoute from './followUp.route';
 import portalRoute from './portal.route';
+import companiesRoute from './companies.route';
+import companyRoute from './company.route';
+import submissionRoute from './submission.route';
 import fileRoute, { servesLocalFiles } from './file.route';
 import docsRoute from './docs.route';
 
@@ -36,9 +39,11 @@ const router = express.Router();
  * Every route except /auth needs X-Practice-Id. /me is the exception that
  * proves it: its answer is what tells the app which practice ids exist.
  *
- * A practice is an organisation of some type, and every route here serves
- * clinics only - resolvePractice refuses any other kind - except /settings,
- * which any member of any organisation may use.
+ * A practice is an organisation of some type, and every route says which
+ * kinds it serves by the tenancy check it mounts. Most serve clinics only -
+ * resolvePractice refuses any other kind. /settings and /members serve every
+ * kind; /companies serves the platform; /company serves a company; and
+ * /submissions serves the platform and the organisations that send to it.
  *
  * /portal is outside that rule too: it needs sign-in and no X-Practice-Id,
  * because a patient is not a member of anything.
@@ -69,6 +74,9 @@ const routes = [
   // Public: a printout's QR code. No sign-in and no X-Practice-Id.
   { path: '/verify', route: verifyRoute },
   { path: '/portal', route: portalRoute },
+  { path: '/companies', route: companiesRoute },
+  { path: '/company', route: companyRoute },
+  { path: '/submissions', route: submissionRoute },
   // Not built yet; mounted so the app can link to it.
   { path: '/devices', route: deviceRoute },
 ];

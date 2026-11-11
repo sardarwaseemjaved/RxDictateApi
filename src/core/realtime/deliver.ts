@@ -73,9 +73,9 @@ export const closeConnection = (connection: Connection, code: ErrorCode, message
  * What a member must hold to hear a topic. Reaching every location is not the
  * same as seeing what happens there: a medicine manager reaches them all and
  * must not hear about patients, visits or prescriptions, even as a bare id.
- * Null is for what everyone in a clinic hears.
+ * Null is for what everyone in an organisation hears; a list is any one of them.
  */
-const TOPIC_READ: Record<RealtimeTopic, Action | null> = {
+const TOPIC_READ: Record<RealtimeTopic, Action | readonly Action[] | null> = {
   visits: 'visit.read',
   vitals: 'visit.read',
   prescriptions: 'prescription.read',
@@ -88,11 +88,16 @@ const TOPIC_READ: Record<RealtimeTopic, Action | null> = {
   voice: 'voice.read',
   settings: 'settings.read',
   medicines: null,
+  // A reviewer, a company's staff, or a clinic's doctors and medicine manager.
+  submissions: ['submission.review', 'drug.submit', 'drug.propose'],
 };
 
 const mayHear = (connection: Connection, message: RealtimeServerMessage): boolean => {
-  const action = message.type === 'changed' ? TOPIC_READ[message.topic] : null;
-  return action === null || can(connection.role, action);
+  const needed = message.type === 'changed' ? TOPIC_READ[message.topic] : null;
+  if (needed === null) {
+    return true;
+  }
+  return (typeof needed === 'string' ? [needed] : needed).some((action) => can(connection.role, action));
 };
 
 const audienceOf = (audience: Audience): Connection[] => {
@@ -123,7 +128,8 @@ const changeAccess = ({ practiceId, userId, role, locationIds }: Extract<Deliver
       nextRole,
       locationIds.map((id) => new Types.ObjectId(id)),
     );
-    if (allowed !== 'all' && !allowed.some((id) => id.equals(connection.who.locationId))) {
+    const { locationId } = connection.who;
+    if (allowed !== 'all' && locationId && !allowed.some((id) => id.equals(locationId))) {
       closeConnection(connection, 'LOCATION_NOT_ALLOWED', 'You no longer work at this location.');
       return;
     }

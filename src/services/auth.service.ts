@@ -190,6 +190,7 @@ export const membershipViews = async (userId: Types.ObjectId): Promise<Membershi
         practiceId: String(membership.practiceId),
         practiceName: practice?.name ?? '',
         organisationType: practice?.type ?? 'clinic',
+        organisationStatus: practice?.status ?? 'active',
         role: membership.role,
         can: actionsFor(membership.role),
         locationIds: locations.map((location) => String(location._id)),

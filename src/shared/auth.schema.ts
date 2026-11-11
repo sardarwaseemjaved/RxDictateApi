@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { objectIdSchema, phoneSchema } from './common';
-import { actionSchema, organisationTypeSchema, roleSchema } from './roles';
+import { actionSchema, organisationStatusSchema, organisationTypeSchema, roleSchema } from './roles';
 
 export const sendOtpBodySchema = z.object({
   phone: phoneSchema,
@@ -99,6 +99,8 @@ export const membershipViewSchema = z.object({
   practiceId: objectIdSchema,
   practiceName: z.string(),
   organisationType: organisationTypeSchema,
+  /** `suspended` only for a company RxDictate has suspended: its routes then answer ORGANISATION_SUSPENDED. */
+  organisationStatus: organisationStatusSchema,
   role: roleSchema,
   can: z.array(actionSchema),
   locationIds: z.array(objectIdSchema),

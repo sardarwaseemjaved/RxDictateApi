@@ -41,6 +41,14 @@ export interface IDrug {
   practiceId: mongoose.Types.ObjectId | null;
   /** The doctor, on a `doctor` row. */
   ownerId: mongoose.Types.ObjectId | null;
+  /**
+   * The company that owns a national row: its own product, or a DRAP row it
+   * claimed. Only ever set by approving a submission. Not `practiceId`, which
+   * would take the row out of the national catalog.
+   */
+  companyId: mongoose.Types.ObjectId | null;
+  /** On a clinic's item merged into a national row: that row. The item itself is discontinued. */
+  mergedIntoId: mongoose.Types.ObjectId | null;
   /** For sorting by name. */
   brandKey: string;
   /** Brand, strength and form without case or spacing: what makes two rows the same medicine. */
@@ -102,6 +110,8 @@ const drugSchema = new Schema<IDrug>(
     status: { type: String, enum: drugStatusSchema.options, default: 'active' },
     practiceId: { type: Schema.Types.ObjectId, ref: 'Practice', default: null },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    companyId: { type: Schema.Types.ObjectId, ref: 'Practice', default: null },
+    mergedIntoId: { type: Schema.Types.ObjectId, ref: 'Drug', default: null },
     brandKey: { type: String, required: true },
     identityKey: { type: String, required: true },
     nameKeys: { type: [String], default: [] },
@@ -121,6 +131,9 @@ drugSchema.index({ scope: 1, status: 1, practiceId: 1, ownerId: 1, wordKeys: 1 }
 
 // Linking a line that was typed to the row it names.
 drugSchema.index({ identityKey: 1 });
+
+// A company's own products, by name.
+drugSchema.index({ companyId: 1, brandKey: 1 }, { partialFilterExpression: { companyId: { $type: 'objectId' } } });
 
 // One row per product in the catalog, and one per medicine per owner elsewhere.
 drugSchema.index({ drapRegNo: 1 }, { unique: true, partialFilterExpression: { drapRegNo: { $type: 'string' } } });

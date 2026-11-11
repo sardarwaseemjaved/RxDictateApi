@@ -33,10 +33,14 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'location.update': ['doctor'],
   'location.archive': ['doctor'],
 
-  'member.read': ['doctor'],
-  'member.add': ['doctor'],
+  // Each organisation's own staff, by whoever runs it: a clinic's doctor, a
+  // company's admin, the platform's admin. /members serves all three kinds and
+  // the service keeps each to its own roles. Only a clinic edits a member: a
+  // company's or the platform's role never changes, and there are no locations.
+  'member.read': ['doctor', 'companyAdmin', 'platformAdmin'],
+  'member.add': ['doctor', 'companyAdmin', 'platformAdmin'],
   'member.update': ['doctor'],
-  'member.remove': ['doctor'],
+  'member.remove': ['doctor', 'companyAdmin', 'platformAdmin'],
 
   // Adding patients and running the day's list is most of the PA's job.
   'patient.read': ['doctor', 'pa'],
@@ -71,6 +75,13 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'drugList.read': ['doctor', 'medicineManager'],
   'drugList.own.manage': ['doctor'],
   'drugList.clinic.manage': ['doctor', 'medicineManager'],
+  // Offering one of the clinic's own items to the national catalog.
+  'drug.propose': ['doctor', 'medicineManager'],
+
+  // A company's products reach every doctor, so everything a company sends goes
+  // to review first. Both of a company's roles send; only an admin manages staff.
+  'drug.submit': ['companyAdmin', 'companyEditor'],
+  'company.profile.read': ['companyAdmin', 'companyEditor'],
 
   // A template is one doctor's prescribing habit, kept for that doctor.
   'template.read': ['doctor'],
@@ -93,9 +104,28 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   // Everybody who works somewhere reads what applies to them and sets their
   // own, where the registry lets a person choose. Not a patient, who holds
   // nothing here: /portal answers to a patient's link, not to this table.
-  'settings.read': ['doctor', 'pa', 'medicineManager', 'platformAdmin', 'reviewer', 'contentManager'],
+  'settings.read': [
+    'doctor',
+    'pa',
+    'medicineManager',
+    'platformAdmin',
+    'reviewer',
+    'contentManager',
+    'companyAdmin',
+    'companyEditor',
+  ],
   'settings.organisation.update': ['doctor'],
   'settings.platform.update': ['platformAdmin'],
+
+  // RxDictate checks a company before it exists, so only the platform makes,
+  // edits and suspends one. A reviewer reads them to judge what they send.
+  'company.read': ['platformAdmin', 'reviewer'],
+  'company.create': ['platformAdmin'],
+  'company.update': ['platformAdmin'],
+  'company.suspend': ['platformAdmin'],
+
+  // The review queue. contentManager gets nothing here yet: it is for announcements.
+  'submission.review': ['platformAdmin', 'reviewer'],
 };
 
 export const can = (role: Role, action: Action): boolean => PERMISSIONS[action].includes(role);

@@ -912,7 +912,7 @@ describe('The medicine manager', () => {
     expect(membership.locations).toHaveLength(2);
     expect(membership.can).toEqual(actionsFor('medicineManager'));
     expect([...membership.can].sort()).toEqual(
-      ['drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
+      ['drug.propose', 'drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
     );
   });
 

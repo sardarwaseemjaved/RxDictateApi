@@ -1,19 +1,29 @@
 import { z } from 'zod';
 import { objectIdSchema, paginationQuerySchema } from './common';
 import { dosePatternSchema, medicineFormSchema, medicineItemSchema, medicineTimingSchema } from './prescription.schema';
+import { submissionSummarySchema } from './submissionStatus';
 
 /**
- * - `national`: the catalog, which comes only from the DRAP import.
+ * - `national`: the catalog: the DRAP import, and what a reviewer approved -
+ *   a company's product, or a clinic's item published to everyone.
  * - `clinic`: one clinic's own item, seen only inside that clinic.
  * - `doctor`: one doctor's, seen only by that doctor in that clinic.
  */
 export const drugScopeSchema = z.enum(['national', 'clinic', 'doctor']);
 export type DrugScope = z.infer<typeof drugScopeSchema>;
 
-export const drugSourceSchema = z.enum(['drapImport', 'clinic', 'typed']);
+/**
+ * Where a row came from. `company` is a company's own product, or a DRAP row a
+ * company claimed: its `company` text is that company's name. A company's rows
+ * rank like any other; nothing paid or promoted ever touches suggestions.
+ */
+export const drugSourceSchema = z.enum(['drapImport', 'clinic', 'typed', 'company']);
 export type DrugSource = z.infer<typeof drugSourceSchema>;
 
-/** Only `active` and `discontinued` are used yet. */
+/**
+ * Only `active` and `discontinued` are used on a row. What is still in review
+ * is a submission, not a row, so nothing a doctor sees is ever pending.
+ */
 export const drugStatusSchema = z.enum(['pending', 'active', 'rejected', 'discontinued']);
 export type DrugStatus = z.infer<typeof drugStatusSchema>;
 
@@ -133,5 +143,11 @@ export const drugListItemViewSchema = z.object({
   drug: drugViewSchema,
   usual: usualSchema.nullable(),
   addedAt: z.coerce.date(),
+  /**
+   * On the clinic's list: the latest proposal to put this item in the national
+   * catalog, with its status and the reviewer's note. Null when there is none,
+   * and always null on a doctor's own list.
+   */
+  proposal: submissionSummarySchema.nullable(),
 });
 export type DrugListItemView = z.infer<typeof drugListItemViewSchema>;

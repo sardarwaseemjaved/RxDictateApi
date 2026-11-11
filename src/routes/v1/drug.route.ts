@@ -44,4 +44,14 @@ router.patch(
   drugController.updateDrug,
 );
 
+// A clinic's own item, offered to the national catalog. A submission: nothing changes until a reviewer approves it.
+router.post(
+  '/:id/propose',
+  requireAuth,
+  resolvePractice,
+  requireCan('drug.propose'),
+  validate(drugValidation.proposeDrug),
+  drugController.proposeDrug,
+);
+
 export default router;

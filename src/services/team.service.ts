@@ -4,7 +4,14 @@ import { BaseRepository, type Scope } from '../core/db';
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
-import type { AddMemberBody, ListMembersQuery, MemberView, UpdateMemberBody } from '../shared/team.schema';
+import type {
+  AddMemberBody,
+  AddOrganisationMemberBody,
+  ListMembersQuery,
+  MemberView,
+  UpdateMemberBody,
+} from '../shared/team.schema';
+import { ADMIN_ROLE_BY_ORGANISATION_TYPE, roleFitsOrganisation, type OrganisationType, type Role } from '../shared/roles';
 
 // Memberships are retired by status rather than deletedAt: a removed PA's past
 // actions stay attributable, and re-adding her reuses the row she already had.
@@ -44,32 +51,44 @@ const assertLocations = async (scope: Scope, locationIds: string[]): Promise<Typ
   return ids;
 };
 
-/**
- * Added by phone number, with no invite code anywhere.
- *
- * The doctor types the number; the server finds or creates that user and gives
- * her a membership. If she already has an account from another clinic it is the
- * same user, with a second membership, and she notices nothing.
- */
-export const addMember = async (scope: Scope, body: AddMemberBody): Promise<MemberView> => {
-  // A medicine manager reaches every location, so nothing is kept on the membership.
-  const locationIds = body.role === 'medicineManager' ? [] : await assertLocations(scope, body.locationIds);
-
-  let user = await User.findOne({ phone: body.phone });
+/** The person with this phone, made if nobody has signed in with it yet. A name fills a blank one. */
+const userFor = async (phone: string, name?: string): Promise<UserDoc> => {
+  const user = await User.findOne({ phone });
   if (!user) {
-    user = await User.create({ phone: body.phone, name: body.name ?? '' });
-  } else if (body.name && !user.name) {
-    user.name = body.name;
+    return User.create({ phone, name: name ?? '' });
+  }
+  if (name && !user.name) {
+    user.name = name;
     await user.save();
   }
+  return user;
+};
+
+/**
+ * Give a person a role in an organisation, audit it, and say so.
+ *
+ * One row per person per organisation, so a removed member is reactivated
+ * rather than forked. The membership model refuses a role that does not fit
+ * the organisation, whoever calls this. Used by /members for every kind of
+ * organisation and by the platform when it creates a company with its admin.
+ */
+export const grantMembership = async (
+  scope: Scope,
+  organisationType: OrganisationType,
+  person: { phone: string; name?: string },
+  role: Role,
+  locationIds: Types.ObjectId[],
+): Promise<MemberView> => {
+  const user = await userFor(person.phone, person.name);
 
   const existing = await Membership.findOne({ practiceId: scope.practiceId, userId: user._id });
   if (existing && existing.status === 'active') {
-    throw new AppError('ALREADY_MEMBER', 'That number is already on this clinic');
+    throw new AppError(
+      'ALREADY_MEMBER',
+      organisationType === 'clinic' ? 'That number is already on this clinic' : 'That number is already a member here',
+    );
   }
 
-  // One row per person per practice, so a removed member is reactivated rather
-  // than forked.
   const membership =
     existing ??
     new Membership({
@@ -79,7 +98,7 @@ export const addMember = async (scope: Scope, body: AddMemberBody): Promise<Memb
       createdBy: scope.actorId,
     });
 
-  membership.role = body.role;
+  membership.role = role;
   membership.locationIds = locationIds;
   membership.status = 'active';
   membership.removedAt = null;
@@ -95,6 +114,7 @@ export const addMember = async (scope: Scope, body: AddMemberBody): Promise<Memb
   });
   emit('member.added', {
     practiceId: scope.practiceId,
+    organisationType,
     membershipId: membership._id,
     userId: user._id,
     phone: user.phone,
@@ -103,6 +123,37 @@ export const addMember = async (scope: Scope, body: AddMemberBody): Promise<Memb
   });
 
   return after;
+};
+
+/**
+ * Added by phone number, with no invite code anywhere.
+ *
+ * The doctor types the number; the server finds or creates that user and gives
+ * them a membership. If they already have an account from another clinic it is
+ * the same user, with a second membership, and they notice nothing.
+ */
+export const addMember = async (scope: Scope, body: AddMemberBody): Promise<MemberView> => {
+  // A medicine manager reaches every location, so nothing is kept on the membership.
+  const locationIds = body.role === 'medicineManager' ? [] : await assertLocations(scope, body.locationIds);
+  return grantMembership(scope, 'clinic', body, body.role, locationIds);
+};
+
+/**
+ * A company's staff by its admin, or the platform's by a platform admin: by
+ * phone, with one of that organisation's roles, and no locations. A role from
+ * another kind of organisation is refused here, before anyone is made.
+ */
+export const addOrganisationMember = async (
+  scope: Scope,
+  organisationType: Exclude<OrganisationType, 'clinic'>,
+  body: AddOrganisationMemberBody,
+): Promise<MemberView> => {
+  if (!roleFitsOrganisation(body.role, organisationType)) {
+    throw new AppError('VALIDATION_ERROR', `body.role: ${body.role} is not a role here`, [
+      { field: 'body.role', message: `is not a role in a ${organisationType}` },
+    ]);
+  }
+  return grantMembership(scope, organisationType, body, body.role, []);
 };
 
 export const updateMember = async (scope: Scope, id: string, patch: UpdateMemberBody): Promise<MemberView> => {
@@ -176,13 +227,28 @@ export const updateMember = async (scope: Scope, id: string, patch: UpdateMember
  * with the same code - and everything they did stays in the audit log under
  * their name.
  */
-export const removeMember = async (scope: Scope, id: string): Promise<MemberView> => {
+export const removeMember = async (
+  scope: Scope,
+  id: string,
+  organisationType: OrganisationType = 'clinic',
+): Promise<MemberView> => {
   const membership = await memberships.findByIdOrFail(scope, id, 'Member');
 
-  if (membership.role === 'doctor') {
+  if (organisationType === 'clinic' && membership.role === 'doctor') {
     const doctors = await memberships.count(scope, { role: 'doctor', status: 'active' });
     if (doctors <= 1) {
       throw new AppError('LAST_DOCTOR', 'A clinic needs at least one doctor');
+    }
+  }
+
+  // A company or the platform keeps at least one admin, the way a clinic keeps a doctor.
+  if (organisationType !== 'clinic') {
+    const admin = ADMIN_ROLE_BY_ORGANISATION_TYPE[organisationType];
+    if (membership.role === admin && membership.status === 'active') {
+      const admins = await memberships.count(scope, { role: admin, status: 'active' });
+      if (admins <= 1) {
+        throw new AppError('LAST_ADMIN', 'There has to be at least one admin. Add another before removing this one.');
+      }
     }
   }
 
@@ -197,6 +263,7 @@ export const removeMember = async (scope: Scope, id: string): Promise<MemberView
   await writeAudit(scope, { action: 'member.remove', entity: 'membership', entityId: membership._id, before, after });
   emit('member.removed', {
     practiceId: scope.practiceId,
+    organisationType,
     membershipId: membership._id,
     userId: membership.userId,
     actorId: scope.actorId,
@@ -205,4 +272,4 @@ export const removeMember = async (scope: Scope, id: string): Promise<MemberView
   return after;
 };
 
-export default { listMembers, addMember, updateMember, removeMember };
+export default { listMembers, addMember, addOrganisationMember, grantMembership, updateMember, removeMember };

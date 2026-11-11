@@ -7,7 +7,7 @@ import {
   type RealtimeClientMessage,
 } from '../../shared/realtime.schema';
 import { AppError, isAppError } from '../errors';
-import { checkLocation, practiceContextFor } from '../tenancy';
+import { ANY_ORGANISATION, checkLocation, practiceContextFor } from '../tenancy';
 import { closeConnection, refuse, sendTo } from './deliver';
 import { Connection, register, unregister } from './registry';
 
@@ -25,13 +25,23 @@ const parse = (data: RawData): RealtimeClientMessage | null => {
 };
 
 /**
- * The checks an HTTP request to a location-scoped route gets - requireAuth,
- * resolvePractice, resolveLocation - run as the same functions, so a socket
- * is refused with exactly the code that request would have been.
+ * The checks an HTTP request gets - requireAuth, resolveOrganisation, and for
+ * a clinic resolveLocation - run as the same functions, so a socket is
+ * refused with exactly the code that request would have been.
+ *
+ * A clinic's socket belongs to a location, as its routes do. A company's or
+ * the platform's has none: there is nothing location-shaped to hear, and a
+ * locationId sent for one is ignored.
  */
 const check = async (message: RealtimeClientMessage) => {
   const auth = await authenticate(message.token);
-  const ctx = await practiceContextFor(auth.userId, message.practiceId);
+  const ctx = await practiceContextFor(auth.userId, message.practiceId, ANY_ORGANISATION);
+  if (ctx.organisationType !== 'clinic') {
+    return { auth, ctx, locationId: null };
+  }
+  if (!message.locationId) {
+    throw new AppError('LOCATION_REQUIRED', 'A clinic needs a locationId to connect.');
+  }
   const locationId = await checkLocation(ctx, message.locationId);
   if (locationId instanceof AppError) {
     throw locationId;
@@ -89,7 +99,7 @@ export const handleSocket = (socket: WebSocket): void => {
         sessionId: auth.sessionId,
         practiceId: String(ctx.practiceId),
         membershipId: String(ctx.membershipId),
-        locationId: String(locationId),
+        locationId: locationId ? String(locationId) : null,
       },
       ctx.role,
       ctx.allowedLocationIds,
@@ -101,7 +111,8 @@ export const handleSocket = (socket: WebSocket): void => {
 
   const refresh = async (current: Connection, message: RealtimeClientMessage): Promise<void> => {
     const { who } = current;
-    if (message.practiceId !== who.practiceId || message.locationId !== who.locationId) {
+    const sameLocation = who.locationId === null || message.locationId === who.locationId;
+    if (message.practiceId !== who.practiceId || !sameLocation) {
       closeConnection(current, 'VALIDATION_ERROR', 'A different clinic or location needs a new connection.');
       return;
     }

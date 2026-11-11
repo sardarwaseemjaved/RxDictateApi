@@ -1,5 +1,6 @@
 export * as appointmentController from './appointment.controller';
 export * as authController from './auth.controller';
+export * as companyController from './company.controller';
 export * as drugController from './drug.controller';
 export * as drugListController from './drugList.controller';
 export * as locationController from './location.controller';
@@ -11,6 +12,7 @@ export * as practiceController from './practice.controller';
 export * as prescriptionController from './prescription.controller';
 export * as reportController from './report.controller';
 export * as settingsController from './settings.controller';
+export * as submissionController from './submission.controller';
 export * as teamController from './team.controller';
 export * as templateController from './template.controller';
 export * as verifyController from './verify.controller';

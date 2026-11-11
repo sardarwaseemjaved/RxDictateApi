@@ -32,6 +32,7 @@ export { Device, type IDevice, type DeviceDoc } from './device.model';
 export { Session, type ISession, type SessionDoc, type SessionRevokedReason } from './session.model';
 export { Counter, type ICounter, type CounterDoc } from './counter.model';
 export { Setting, type ISetting, type SettingDoc } from './setting.model';
+export { Submission, QUEUE_RANK, type ISubmission, type ISubmissionStep, type SubmissionDoc } from './submission.model';
 
 /* eslint-disable import/first */
 import { Practice } from './practice.model';
@@ -60,6 +61,7 @@ import { Device } from './device.model';
 import { Session } from './session.model';
 import { Counter } from './counter.model';
 import { Setting } from './setting.model';
+import { Submission } from './submission.model';
 
 /**
  * Every collection, including the ones no route touches yet.
@@ -94,6 +96,7 @@ export const allModels = [
   Session,
   Counter,
   Setting,
+  Submission,
 ];
 
 /**

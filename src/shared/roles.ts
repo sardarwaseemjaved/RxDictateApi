@@ -9,8 +9,8 @@ import { z } from 'zod';
  *   hospital is a larger clinic.
  * - `platform`: RxDictate itself. There is exactly one, made by
  *   `yarn platform:init`.
- * - `company`: a medicine company. Allowed here so the apps know the word, but
- *   nothing creates one yet.
+ * - `company`: a medicine company. Only the platform creates one, with its
+ *   first admin, through `POST /companies`.
  */
 export const organisationTypeSchema = z.enum(['clinic', 'platform', 'company']);
 export type OrganisationType = z.infer<typeof organisationTypeSchema>;
@@ -31,19 +31,38 @@ export const roleSchema = z.enum([
   'platformAdmin',
   'reviewer',
   'contentManager',
+  'companyAdmin',
+  'companyEditor',
 ]);
 export type Role = z.infer<typeof roleSchema>;
 
 /**
  * Which roles each kind of organisation holds. `patient` is still reserved: no
- * route gives it out, and a patient's link is not a membership. A company has no roles until companies exist, so nobody
- * can belong to one.
+ * route gives it out, and a patient's link is not a membership.
  */
 export const ROLES_BY_ORGANISATION_TYPE: Record<OrganisationType, readonly Role[]> = {
   clinic: ['doctor', 'pa', 'medicineManager', 'patient'],
   platform: ['platformAdmin', 'reviewer', 'contentManager'],
-  company: [],
+  company: ['companyAdmin', 'companyEditor'],
 };
+
+/**
+ * The role that runs an organisation that is not a clinic. Each keeps at least
+ * one, the way a clinic keeps a doctor.
+ */
+export const ADMIN_ROLE_BY_ORGANISATION_TYPE: Record<Exclude<OrganisationType, 'clinic'>, Role> = {
+  platform: 'platformAdmin',
+  company: 'companyAdmin',
+};
+
+/**
+ * Whether an organisation is open for its members. Only a company is ever
+ * suspended, by the platform: its members are then refused everywhere with
+ * ORGANISATION_SUSPENDED, its pending submissions wait, and its live products
+ * stay live.
+ */
+export const organisationStatusSchema = z.enum(['active', 'suspended']);
+export type OrganisationStatus = z.infer<typeof organisationStatusSchema>;
 
 export const roleFitsOrganisation = (role: Role, type: OrganisationType): boolean =>
   ROLES_BY_ORGANISATION_TYPE[type].includes(role);
@@ -95,6 +114,10 @@ export const ACTIONS = [
   'voice.read',
 
   'drug.search',
+  // A clinic's own item, offered to the national catalog. Goes to review.
+  'drug.propose',
+  // A company's products: new ones, changes, discontinuations and claims. Each goes to review.
+  'drug.submit',
 
   'drugList.read',
   // A doctor's own list in this clinic, the medicines they add for themselves, and their typed rows.
@@ -123,6 +146,17 @@ export const ACTIONS = [
   'settings.organisation.update',
   // Values and locks for every organisation at once.
   'settings.platform.update',
+
+  // Medicine companies, as the platform sees them.
+  'company.read',
+  'company.create',
+  'company.update',
+  'company.suspend',
+  // A company member reading their own company's profile.
+  'company.profile.read',
+
+  // Deciding what the review queue holds: approve, reject, or ask for changes.
+  'submission.review',
 ] as const;
 
 export const actionSchema = z.enum(ACTIONS);

@@ -76,6 +76,9 @@ export const auditOnPlatform = async (action: string, after: unknown): Promise<b
  * A row skipped for a missing brand still names its registration number, so
  * `discontinueMissing` does not retire a product over a bad line. A file with
  * nothing usable in it is refused rather than read as "every product is gone".
+ *
+ * A product a company owns is left as it is, and never discontinued by a file:
+ * what it says changes only through that company's reviewed submissions.
  */
 export const importDrugs = async (csv: string, options: ImportOptions = {}): Promise<ImportSummary> => {
   const { dryRun = false, discontinueMissing = false } = options;
@@ -116,18 +119,27 @@ export const importDrugs = async (csv: string, options: ImportOptions = {}): Pro
     throw new Error('Nothing in the file can be imported, so nothing was changed.');
   }
 
-  const known = new Map(
-    (await Drug.find({ scope: 'national', drapRegNo: { $in: [...named] } }).select('drapRegNo aliases')).map((drug) => [
-      drug.drapRegNo!,
-      drug.aliases,
-    ]),
-  );
-  summary.inserted = usable.filter(({ registrationNo }) => !known.has(registrationNo)).length;
-  summary.updated = usable.length - summary.inserted;
+  const found = await Drug.find({ scope: 'national', drapRegNo: { $in: [...named] } }).select('drapRegNo aliases companyId');
+  const known = new Map(found.map((drug) => [drug.drapRegNo!, drug.aliases]));
+  const companies = new Set(found.filter((drug) => drug.companyId).map((drug) => drug.drapRegNo!));
+  const toWrite = usable.filter(({ registrationNo, row }) => {
+    if (!companies.has(registrationNo)) {
+      return true;
+    }
+    summary.skipped.push({
+      line: rows.indexOf(row) + 2,
+      registrationNo,
+      reason: "a company owns this product; it changes only through that company's reviewed submissions",
+    });
+    return false;
+  });
+  summary.inserted = toWrite.filter(({ registrationNo }) => !known.has(registrationNo)).length;
+  summary.updated = toWrite.length - summary.inserted;
 
   const stillAround = {
     scope: 'national',
     status: 'active',
+    companyId: null,
     drapRegNo: { $nin: [...named] },
   };
 
@@ -136,7 +148,7 @@ export const importDrugs = async (csv: string, options: ImportOptions = {}): Pro
     return summary;
   }
 
-  const writes = usable.map(({ registrationNo, row }) => {
+  const writes = toWrite.map(({ registrationNo, row }) => {
     const fields: Pick<IDrug, 'brand' | 'generic' | 'strength' | 'form' | 'pack' | 'company'> = {
       brand: read(row, 'brand'),
       generic: read(row, 'composition'),

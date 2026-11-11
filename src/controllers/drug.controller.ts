@@ -1,6 +1,7 @@
 import { auditScope } from '../core/audit';
 import { scopeFrom } from '../core/tenancy';
 import * as drugService from '../services/drug.service';
+import * as submissionService from '../services/submission.service';
 import catchAsync from '../utils/catchAsync';
 import { parsedBody, parsedQuery } from '../utils/request';
 import { sendCreated, sendData } from '../utils/response';
@@ -21,4 +22,8 @@ export const createDrug = catchAsync(async (req, res) => {
 
 export const updateDrug = catchAsync(async (req, res) => {
   sendData(res, await drugService.updateDrug(auditScope(req), req.params.id, parsedBody<UpdateDrugBody>(req)));
+});
+
+export const proposeDrug = catchAsync(async (req, res) => {
+  sendCreated(res, await submissionService.proposeDrug(auditScope(req), req.params.id));
 });

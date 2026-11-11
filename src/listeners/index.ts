@@ -1,6 +1,6 @@
 import logger from '../config/logger';
 import { on } from '../core/events';
-import { sendMemberAdded, sendPortalInvite } from '../core/sms';
+import { sendMemberAdded, sendOrganisationMemberAdded, sendPortalInvite } from '../core/sms';
 import { Membership, Practice, Prescription, User } from '../models';
 import { notify, notifyPractice } from '../services/notification.service';
 import { inviteAfterApproval, inviteUrl } from '../services/patientPortal.service';
@@ -95,7 +95,15 @@ on('patient.portalInvited', async ({ practiceId, patientId, phone, code, actorId
  * The one piece of outbound messaging that matters today: a PA who has just
  * been added has no idea they can sign in until somebody says so.
  */
-on('member.added', async ({ practiceId, userId, phone, membershipId, actorId }) => {
+on('member.added', async ({ practiceId, organisationType, userId, phone, membershipId, actorId }) => {
+  // A company's or the platform's staff: the organisation by name, and no inbox
+  // entry, since only a clinic has an inbox to read it in.
+  if (organisationType !== 'clinic') {
+    const organisation = await Practice.findById(practiceId);
+    await sendOrganisationMemberAdded(phone, organisation?.name ?? 'RxDictate');
+    return;
+  }
+
   const [practice, addedBy] = await Promise.all([Practice.findById(practiceId), User.findById(actorId)]);
 
   // A failure in here is caught by the bus and sendMemberAdded swallows its
@@ -113,7 +121,10 @@ on('member.added', async ({ practiceId, userId, phone, membershipId, actorId }) 
   });
 });
 
-on('member.removed', async ({ practiceId, membershipId, userId, actorId }) => {
+on('member.removed', async ({ practiceId, organisationType, membershipId, userId, actorId }) => {
+  if (organisationType !== 'clinic') {
+    return;
+  }
   await notify({
     practiceId,
     userId,

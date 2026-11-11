@@ -1,7 +1,13 @@
 import mongoose, { Schema, type HydratedDocument, type Types } from 'mongoose';
 import { paginate, toJSON, type PaginateModel } from './plugins';
 import type { PracticeFeatures, PracticeSettings } from '../shared/practice.schema';
-import { organisationTypeSchema, type OrganisationType } from '../shared/roles';
+import {
+  organisationStatusSchema,
+  organisationTypeSchema,
+  type OrganisationStatus,
+  type OrganisationType,
+} from '../shared/roles';
+import { PROVINCES, type Province } from '../shared/location.schema';
 
 /**
  * The tenant. Built for one doctor today, but every other record points at a
@@ -12,10 +18,22 @@ import { organisationTypeSchema, type OrganisationType } from '../shared/roles';
  * made before types existed is a clinic, and the boot backfill writes that
  * down. The letterhead fields and counters mean nothing to the platform and
  * stay at their defaults there.
+ *
+ * A company's details - address, registration and licence numbers, contact -
+ * sit here too, and mean nothing to a clinic.
  */
 export interface IPractice {
   type: OrganisationType;
+  /** Only a company is ever suspended. */
+  status: OrganisationStatus;
+  suspendedAt: Date | null;
   name: string;
+  address: string;
+  province: Province | null;
+  city: string | null;
+  secpRegNo: string | null;
+  drapLicenceNo: string | null;
+  contactPhone: string | null;
   ownerId: Types.ObjectId;
   pmdcNo: string;
   qualifications: string[];
@@ -45,7 +63,15 @@ export type PracticeDoc = HydratedDocument<IPractice>;
 const practiceSchema = new Schema<IPractice>(
   {
     type: { type: String, enum: organisationTypeSchema.options, default: 'clinic' },
+    status: { type: String, enum: organisationStatusSchema.options, default: 'active' },
+    suspendedAt: { type: Date, default: null },
     name: { type: String, required: true, trim: true },
+    address: { type: String, default: '', trim: true },
+    province: { type: String, enum: [...PROVINCES, null], default: null },
+    city: { type: String, default: null, trim: true },
+    secpRegNo: { type: String, default: null, trim: true },
+    drapLicenceNo: { type: String, default: null, trim: true },
+    contactPhone: { type: String, default: null },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     pmdcNo: { type: String, default: '', trim: true },
     qualifications: { type: [String], default: [] },
@@ -71,6 +97,12 @@ practiceSchema.plugin(paginate);
 practiceSchema.index({ ownerId: 1 });
 // There is exactly one platform, and two runs of platform:init at once cannot make a second.
 practiceSchema.index({ type: 1 }, { unique: true, partialFilterExpression: { type: 'platform' } });
+// One company per SECP registration, and the list of companies by name.
+practiceSchema.index(
+  { secpRegNo: 1 },
+  { unique: true, partialFilterExpression: { type: 'company', secpRegNo: { $type: 'string' } } },
+);
+practiceSchema.index({ type: 1, name: 1 });
 
 export const Practice = mongoose.model<IPractice, PaginateModel<IPractice>>('Practice', practiceSchema, 'practices');
 export default Practice;

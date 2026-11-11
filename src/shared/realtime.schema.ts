@@ -35,6 +35,8 @@ export const realtimeTopicSchema = z.enum([
   'voice',
   'settings',
   'medicines',
+  // The review queue: a reviewer's, and each sender's own. No location.
+  'submissions',
 ]);
 export type RealtimeTopic = z.infer<typeof realtimeTopicSchema>;
 
@@ -45,12 +47,15 @@ export type RealtimeTopic = z.infer<typeof realtimeTopicSchema>;
  * fresh access token after a refresh, which keeps the socket open past the
  * old token's expiry. A later one must name the same clinic and location: a
  * different one means a new connection.
+ *
+ * `locationId` is required for a clinic. A company or the platform has no
+ * locations, so a socket for one leaves it out (one sent is ignored).
  */
 export const realtimeClientMessageSchema = z.object({
   type: z.literal('auth'),
   token: z.string(),
   practiceId: objectIdSchema,
-  locationId: objectIdSchema,
+  locationId: objectIdSchema.optional(),
 });
 export type RealtimeClientMessage = z.infer<typeof realtimeClientMessageSchema>;
 

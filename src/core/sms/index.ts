@@ -84,6 +84,19 @@ export const sendMemberAdded = async (phone: string, addedByName: string, practi
 };
 
 /**
+ * To someone a company or RxDictate has added to its staff. Names the
+ * organisation, not whoever added them - they are not a doctor, and "Dr." in
+ * front of a company admin's name would be wrong - and never the role.
+ */
+export const sendOrganisationMemberAdded = async (phone: string, organisationName: string): Promise<void> => {
+  await sendQuietly(
+    phone,
+    `You have been added to ${organisationName} on ${config.sms.appName}. Sign in with this number.`,
+    'member invitation',
+  );
+};
+
+/**
  * An invite to see a record online. Names the clinic and the doctor, and never
  * the patient, a medicine or a diagnosis: a phone is often the whole family's,
  * and a message on it is read by whoever picks it up.
@@ -102,4 +115,4 @@ export const sendPortalInvite = async (
   await sendQuietly(phone, `${from}: ${what}. Get ${config.sms.appName} and sign in with this number: ${link}`, 'invite');
 };
 
-export default { provider, sendOtp, sendMemberAdded, sendPortalInvite };
+export default { provider, sendOtp, sendMemberAdded, sendOrganisationMemberAdded, sendPortalInvite };
