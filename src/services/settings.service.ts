@@ -87,6 +87,13 @@ const viewFrom = (rows: SettingDoc[]): SettingsView =>
 /** GET /settings: every key, as it applies to this person in this organisation. */
 export const getSettings = async (scope: Scope): Promise<SettingsView> => viewFrom(await rowsFor(whoFrom(scope)));
 
+/** One key, as it applies to this person in this organisation. */
+export const settingFor = async <K extends SettingKey>(scope: Scope, key: K): Promise<SettingValue<K>> => {
+  const who = whoFrom(scope);
+  const rows = await Setting.find({ key, $or: LAYERS.map((layer) => target(layer, who)) });
+  return resolve(rows, key).value as SettingValue<K>;
+};
+
 /**
  * What applies to a whole clinic, for when nobody in it is asking: a patient
  * opening a record, or an approval deciding whether to send an invite. Only for

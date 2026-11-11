@@ -24,6 +24,7 @@ import portalRoute from './portal.route';
 import companiesRoute from './companies.route';
 import companyRoute from './company.route';
 import submissionRoute from './submission.route';
+import announcementRoute from './announcement.route';
 import fileRoute, { servesLocalFiles } from './file.route';
 import docsRoute from './docs.route';
 
@@ -42,8 +43,9 @@ const router = express.Router();
  * A practice is an organisation of some type, and every route says which
  * kinds it serves by the tenancy check it mounts. Most serve clinics only -
  * resolvePractice refuses any other kind. /settings and /members serve every
- * kind; /companies serves the platform; /company serves a company; and
- * /submissions serves the platform and the organisations that send to it.
+ * kind; /companies serves the platform; /company serves a company;
+ * /submissions serves the platform and the organisations that send to it; and
+ * /announcements serves the platform's console and clinic members, route by route.
  *
  * /portal is outside that rule too: it needs sign-in and no X-Practice-Id,
  * because a patient is not a member of anything.
@@ -77,6 +79,7 @@ const routes = [
   { path: '/companies', route: companiesRoute },
   { path: '/company', route: companyRoute },
   { path: '/submissions', route: submissionRoute },
+  { path: '/announcements', route: announcementRoute },
   // Not built yet; mounted so the app can link to it.
   { path: '/devices', route: deviceRoute },
 ];

@@ -90,6 +90,8 @@ const TOPIC_READ: Record<RealtimeTopic, Action | readonly Action[] | null> = {
   medicines: null,
   // A reviewer, a company's staff, or a clinic's doctors and medicine manager.
   submissions: ['submission.review', 'drug.submit', 'drug.propose'],
+  // Clinic members only; sent to every open socket and filtered here.
+  announcements: 'announcement.view',
 };
 
 const mayHear = (connection: Connection, message: RealtimeServerMessage): boolean => {

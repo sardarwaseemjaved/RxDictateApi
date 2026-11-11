@@ -912,7 +912,16 @@ describe('The medicine manager', () => {
     expect(membership.locations).toHaveLength(2);
     expect(membership.can).toEqual(actionsFor('medicineManager'));
     expect([...membership.can].sort()).toEqual(
-      ['drug.propose', 'drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
+      [
+        'drug.propose',
+        'drug.search',
+        'drugList.clinic.manage',
+        'drugList.read',
+        'settings.read',
+        // Their own bell, for reminders they asked for, and the announcements meant for them.
+        'notification.read',
+        'announcement.view',
+      ].sort(),
     );
   });
 
@@ -1046,7 +1055,6 @@ describe('The medicine manager', () => {
       ['get', '/api/v1/prescriptions', undefined],
       ['post', '/api/v1/prescriptions', { patientId }],
       ['get', '/api/v1/appointments?from=2026-10-01&to=2026-10-31', undefined],
-      ['get', '/api/v1/notifications', undefined],
       ['get', '/api/v1/templates', undefined],
       ['get', '/api/v1/members', undefined],
       ['get', '/api/v1/practice', undefined],

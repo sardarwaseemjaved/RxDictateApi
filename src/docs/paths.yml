@@ -1412,3 +1412,264 @@ paths:
             image/svg+xml: { schema: { type: string } }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { description: RATE_LIMITED }
+
+  /announcements:
+    get:
+      tags: [Announcements]
+      summary: The console's announcements, newest first (platform admin, content manager)
+      description: |
+        Filter by status (draft, published, withdrawn), kind (seminar, event, update, product) and
+        sponsorId (a company's id, or none for RxDictate's own). Each is announcementViewSchema;
+        ended is true for a published one whose window has passed.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: status, schema: { type: string, enum: [draft, published, withdrawn] } }
+        - { in: query, name: kind, schema: { type: string, enum: [seminar, event, update, product] } }
+        - { in: query, name: sponsorId, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of announcementViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Announcements]
+      summary: A new announcement, as a draft (platform admin, content manager)
+      description: |
+        Body createAnnouncementBodySchema. A seminar or an event needs event (startsAt, and a place or
+        an online link); register and addToCalendar are only for those. A product needs drugId (an
+        active national medicine) and sponsorId (a company). imageKey must come from
+        POST /announcements/images. An audience's organisationIds must be clinics. Nobody outside the
+        console sees a draft.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: announcementViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /announcements/images:
+    post:
+      tags: [Announcements]
+      summary: Somewhere to PUT an announcement's image (platform admin, content manager)
+      description: |
+        Body createAnnouncementImageBodySchema: image/jpeg or image/png, at most 2 MB. Answers an upload
+        ticket as POST /reports/uploads does; PUT the bytes, then send fileKey as imageKey.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '201': { description: uploadTicketSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: STORAGE_UNAVAILABLE }
+
+  /announcements/audience-count:
+    post:
+      tags: [Announcements]
+      summary: How many people an audience reaches now (platform admin, content manager)
+      description: |
+        Body audienceCountBodySchema: { audience }, typically the one being edited. Active members of
+        clinics in a clinic role who match, a person in two clinics counting once. The same rule the
+        slots use.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      responses:
+        '200': { description: audienceCountViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /announcements/slots:
+    get:
+      tags: [Announcements]
+      summary: What this clinic member sees in one placement (doctor, PA, medicine manager)
+      description: |
+        A list of announcementSlotViewSchema, at most ANNOUNCEMENT_PLACEMENT_LIMITS for the placement
+        long: one for today.banner and sidebar.card, any number for inbox.updates. Published, inside
+        its window, for this member's audience, not dismissed, under its cap; sponsored ones are left
+        out when announcements.sponsored is off. By priority, then newest. X-Location-Id is optional:
+        with it, a place in the audience is matched against that location; without, against any
+        location the member works at.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: header, name: X-Location-Id, required: false, schema: { type: string } }
+        - in: query
+          name: placement
+          required: true
+          schema: { type: string, enum: [today.banner, sidebar.card, inbox.updates] }
+      responses:
+        '200': { description: 'A list of announcementSlotViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /announcements/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      tags: [Announcements]
+      summary: One announcement, with its history (platform admin, content manager)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: announcementViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Announcements]
+      summary: Edit a draft or a published one (platform admin, content manager)
+      description: |
+        Body updateAnnouncementBodySchema: only what changes; audience and event are replaced whole.
+        Checked as the whole announcement it leaves. A withdrawn one is ANNOUNCEMENT_WRONG_STATUS.
+        Editing a published one tells clinic apps (announcements topic); moving its start moves the
+        reminders not yet sent.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: announcementViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: ANNOUNCEMENT_WRONG_STATUS }
+
+  /announcements/{id}/publish:
+    post:
+      tags: [Announcements]
+      summary: Publish a draft (platform admin, content manager)
+      description: |
+        Only a draft (ANNOUNCEMENT_WRONG_STATUS otherwise, with details.status). One whose window has
+        already passed is ANNOUNCEMENT_ENDED. Its medicine and sponsor are checked again.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: announcementViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: ANNOUNCEMENT_WRONG_STATUS or ANNOUNCEMENT_ENDED }
+
+  /announcements/{id}/withdraw:
+    post:
+      tags: [Announcements]
+      summary: Take a published one down for good (platform admin, content manager)
+      description: Only a published one. Every reminder not yet sent is cancelled. Registrations are kept.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: announcementViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: ANNOUNCEMENT_WRONG_STATUS }
+
+  /announcements/{id}/stats:
+    get:
+      tags: [Announcements]
+      summary: Totals only - shows, clicks, dismissals, reminders, registrations (platform admin, content manager)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: announcementStatsViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /announcements/{id}/registrations:
+    get:
+      tags: [Announcements]
+      summary: Who registered, in the order they came (platform admin, content manager)
+      description: Each is announcementRegistrationViewSchema - name, phone and clinic, given with consent.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of announcementRegistrationViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /announcements/{id}/registrations.csv:
+    get:
+      tags: [Announcements]
+      summary: The same list as a CSV file for the organiser (platform admin, content manager)
+      description: Columns Name, Phone, Clinic, Registered (Pakistan time). Not the JSON envelope.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The file, as an attachment
+          content:
+            text/csv: { schema: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /announcements/{id}/events:
+    post:
+      tags: [Announcements]
+      summary: What the app did with one it drew - shown, clicked or dismissed (clinic member)
+      description: |
+        Body announcementEventBodySchema. Send shown when it is actually drawn: maxShows counts those.
+        dismissed hides it from this person for good. Answers this person's state.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200': { description: announcementStateViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'NOT_FOUND - a draft, or one meant for others' }
+        '409': { description: ANNOUNCEMENT_WITHDRAWN }
+
+  /announcements/{id}/reminder:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      tags: [Announcements]
+      summary: Remind me - a day and an hour before it starts (clinic member)
+      description: |
+        Bell notifications (announcement.reminder), skipping a time already past. Asking twice changes
+        nothing. Only a seminar or an event (ANNOUNCEMENT_NOT_AN_EVENT); not a withdrawn one
+        (ANNOUNCEMENT_WITHDRAWN), nor one whose window has passed or that has started
+        (ANNOUNCEMENT_ENDED).
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: announcementStateViewSchema }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: ANNOUNCEMENT_NOT_AN_EVENT, ANNOUNCEMENT_WITHDRAWN or ANNOUNCEMENT_ENDED }
+    delete:
+      tags: [Announcements]
+      summary: Cancel the reminders not yet sent (clinic member)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: announcementStateViewSchema }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /announcements/{id}/register:
+    parameters:
+      - { $ref: '#/components/parameters/PracticeId' }
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      tags: [Announcements]
+      summary: Register, giving the organiser this person's name, phone and clinic (clinic member)
+      description: |
+        Body registerAnnouncementBodySchema: { consent: true }, and nothing else will do. Registering
+        twice changes nothing. The same refusals as a reminder.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: announcementStateViewSchema }
+        '400': { description: VALIDATION_ERROR - consent missing or not true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: ANNOUNCEMENT_NOT_AN_EVENT, ANNOUNCEMENT_WITHDRAWN or ANNOUNCEMENT_ENDED }
+    delete:
+      tags: [Announcements]
+      summary: Take a registration back; the details are deleted (clinic member)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: announcementStateViewSchema }
+        '404': { $ref: '#/components/responses/NotFound' }

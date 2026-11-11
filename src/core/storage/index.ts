@@ -108,6 +108,22 @@ export const isIssuedPageKey = (prefix: string, key: string): boolean =>
 export const portalReportPrefix = (practiceId: Types.ObjectId | string, linkId: Types.ObjectId | string): string =>
   `${practiceId}/reports/portal/${linkId}/`;
 
+/**
+ * Where an announcement's image lands: under the platform organisation, with
+ * a random name, before any announcement claims it.
+ */
+export const announcementImagePrefix = (platformId: Types.ObjectId | string): string =>
+  `${platformId}/announcements/images/`;
+
+export const announcementImageKey = (platformId: Types.ObjectId | string, imageId: string, extension: string): string =>
+  `${announcementImagePrefix(platformId)}${imageId}.${extension}`;
+
+const ANNOUNCEMENT_IMAGE_NAME = /^[0-9a-f]{24}\.(jpg|png)$/;
+
+/** The whole key, as isIssuedPageKey checks a report page's: the prefix, then an issued name and nothing else. */
+export const isIssuedAnnouncementImageKey = (prefix: string, key: string): boolean =>
+  key.startsWith(prefix) && ANNOUNCEMENT_IMAGE_NAME.test(key.slice(prefix.length));
+
 /** The file extension for an uploaded report page. */
 export const reportExtensionFor = (contentType: string): string =>
   ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' })[contentType] ?? 'bin';

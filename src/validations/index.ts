@@ -1,3 +1,4 @@
+export * as announcementValidation from './announcement.validation';
 export * as appointmentValidation from './appointment.validation';
 export * as authValidation from './auth.validation';
 export * as companyValidation from './company.validation';

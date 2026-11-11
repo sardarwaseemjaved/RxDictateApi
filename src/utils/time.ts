@@ -18,6 +18,14 @@ export const karachiDay = (instant: Date = new Date()): string => {
 
 export const todayInKarachi = (): string => karachiDay();
 
+/** The Karachi time of day of an instant, as a person reads it: `5:30 pm`. */
+export const karachiClock = (instant: Date): string => {
+  const shifted = new Date(instant.getTime() + KARACHI_OFFSET_MINUTES * MS_PER_MINUTE);
+  const hours = shifted.getUTCHours();
+  const minutes = String(shifted.getUTCMinutes()).padStart(2, '0');
+  return `${hours % 12 === 0 ? 12 : hours % 12}:${minutes} ${hours < 12 ? 'am' : 'pm'}`;
+};
+
 /** The UTC instants a Karachi calendar day starts and ends at. */
 export const karachiDayRange = (day: string): { start: Date; end: Date } => {
   const start = new Date(`${day}T00:00:00.000Z`).getTime() - KARACHI_OFFSET_MINUTES * MS_PER_MINUTE;

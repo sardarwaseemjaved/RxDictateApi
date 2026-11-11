@@ -237,43 +237,47 @@ anything. Two kinds of route are public and need neither header: `/verify`, whic
 printout's QR code leads to, and `/files`, where a signed link is the credential.
 Every route that takes `X-Practice-Id` says which kinds of organisation it serves
 by the tenancy check it mounts. Most serve clinics only. `/settings` and `/members`
-serve every kind, `/companies` the platform, `/company` a company, and
-`/submissions` the platform and the organisations that send to it (see
-**Organisations** and **Companies and the review queue**).
+serve every kind, `/companies` the platform, `/company` a company,
+`/submissions` the platform and the organisations that send to it, and
+`/announcements` the platform's console and clinic members, route by route (see
+**Organisations**, **Companies and the review queue** and **Announcements**).
 
-| Module        | Routes                                                                                                                                                                                                     | Who                                    |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| auth          | `POST /auth/otp/send`, `/auth/otp/verify`, `/auth/refresh`, `/auth/logout`                                                                                                                                 | anyone                                 |
-| auth          | `POST /auth/logout-all`                                                                                                                                                                                    | signed in — **501**                    |
-| me            | `GET /me`, `PATCH /me`                                                                                                                                                                                     | signed in                              |
-| practice      | `GET /practice`, `PATCH /practice`                                                                                                                                                                         | doctor                                 |
-| locations     | `GET`/`POST /locations`, `PATCH /locations/:id`, `POST /locations/:id/archive`                                                                                                                             | doctor                                 |
-| team          | `GET`/`POST /members`, `DELETE /members/:id`                                                                                                                                                               | doctor, company admin, platform admin  |
-| team          | `PATCH /members/:id`                                                                                                                                                                                       | doctor                                 |
-| patients      | `GET /patients?q=`, `POST /patients`, `GET`/`PATCH /patients/:id`                                                                                                                                          | doctor, PA                             |
-| patients      | `GET`/`PATCH /patients/:id/portal`, `POST /patients/:id/portal/invite`, `DELETE /patients/:id/portal/link` — see **The patient's area**                                                                    | doctor, PA                             |
-| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`, `POST /visits/:id/move`                                                                                                                     | doctor, PA                             |
-| prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/preview`, `GET /prescriptions/:id/pdf`               | doctor (PA: read + preview + pdf)      |
-| voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                                                                | doctor                                 |
-| drugs         | `GET /drugs?q=&limit=&everywhere=` — see **Medicines**                                                                                                                                                     | doctor, medicine manager               |
-| drugs         | `POST /drugs`, `PATCH /drugs/:id`                                                                                                                                                                          | doctor, medicine manager               |
-| drug lists    | `GET /drug-lists/:owner`, `PUT`/`DELETE /drug-lists/:owner/items/:drugId`                                                                                                                                  | doctor, medicine manager               |
-| drugs         | `POST /drugs/:id/propose` — see **Companies and the review queue**                                                                                                                                         | doctor, medicine manager               |
-| companies     | `GET`/`POST /companies`, `GET`/`PATCH /companies/:id`, `POST /companies/:id/suspend`, `/reactivate`                                                                                                        | platform admin (reviewer: read)        |
-| company       | `GET /company`, `GET`/`POST /company/products`, `PATCH /company/products/:id`, `POST /company/products/:id/discontinue`, `/company/products/claim`, `/company/products/csv/check`, `/company/products/csv` | company admin, company editor          |
-| submissions   | `GET /submissions`, `GET /submissions/:id`                                                                                                                                                                 | reviewer; a company or clinic, its own |
-| submissions   | `PATCH /submissions/:id`, `POST /submissions/:id/withdraw`                                                                                                                                                 | the company or clinic that sent it     |
-| submissions   | `POST /submissions/:id/approve`, `/reject`, `/request-changes`                                                                                                                                             | platform admin, reviewer               |
-| history       | `GET /patients/:id/history?kind=`                                                                                                                                                                          | doctor                                 |
-| reports       | `POST /reports/uploads`, `POST`/`GET /patients/:id/reports`, `GET /reports/:id`                                                                                                                            | doctor, PA                             |
-| reports       | `POST /reports/:id/review`                                                                                                                                                                                 | doctor                                 |
-| templates     | `GET`/`POST /templates`, `GET`/`PATCH`/`DELETE /templates/:id`, `POST /prescriptions/from-template/:id`                                                                                                    | doctor                                 |
-| settings      | `GET /settings`, `PATCH /settings/me` — see **Settings**                                                                                                                                                   | anyone in any organisation             |
-| settings      | `PATCH /settings/organisation`                                                                                                                                                                             | by key: doctor, medicine manager       |
-| settings      | `PATCH /settings/platform`                                                                                                                                                                                 | platform admin                         |
-| files         | `GET`/`PUT /files/<key>?…&sig=` — local storage driver only                                                                                                                                                | whoever holds the signed link          |
-| verify        | `GET /verify/:code`, `GET /verify/:code/qr.svg` — see **Verifying a printout**                                                                                                                             | anyone, 30 a minute per address        |
-| portal        | `/portal/links`, and each record route under `/portal/links/:linkId` — see **The patient's area**                                                                                                          | a signed-in person, by their link      |
+| Module        | Routes                                                                                                                                                                                                                 | Who                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| auth          | `POST /auth/otp/send`, `/auth/otp/verify`, `/auth/refresh`, `/auth/logout`                                                                                                                                             | anyone                                 |
+| auth          | `POST /auth/logout-all`                                                                                                                                                                                                | signed in — **501**                    |
+| me            | `GET /me`, `PATCH /me`                                                                                                                                                                                                 | signed in                              |
+| practice      | `GET /practice`, `PATCH /practice`                                                                                                                                                                                     | doctor                                 |
+| locations     | `GET`/`POST /locations`, `PATCH /locations/:id`, `POST /locations/:id/archive`                                                                                                                                         | doctor                                 |
+| team          | `GET`/`POST /members`, `DELETE /members/:id`                                                                                                                                                                           | doctor, company admin, platform admin  |
+| team          | `PATCH /members/:id`                                                                                                                                                                                                   | doctor                                 |
+| patients      | `GET /patients?q=`, `POST /patients`, `GET`/`PATCH /patients/:id`                                                                                                                                                      | doctor, PA                             |
+| patients      | `GET`/`PATCH /patients/:id/portal`, `POST /patients/:id/portal/invite`, `DELETE /patients/:id/portal/link` — see **The patient's area**                                                                                | doctor, PA                             |
+| visits        | `GET /visits?date=today`, `POST /visits`, `PATCH /visits/:id`, `POST /visits/:id/move`                                                                                                                                 | doctor, PA                             |
+| prescriptions | `POST /prescriptions`, `GET`/`PATCH /prescriptions/:id`, `POST /prescriptions/:id/approve`, `POST /prescriptions/:id/revise`, `GET /prescriptions/:id/preview`, `GET /prescriptions/:id/pdf`                           | doctor (PA: read + preview + pdf)      |
+| voice         | `POST /prescriptions/:id/voice/segments`, `GET /prescriptions/:id/voice`, `POST /voice/segments/:id/retry`, `GET /voice/segments/:id/audio`                                                                            | doctor                                 |
+| drugs         | `GET /drugs?q=&limit=&everywhere=` — see **Medicines**                                                                                                                                                                 | doctor, medicine manager               |
+| drugs         | `POST /drugs`, `PATCH /drugs/:id`                                                                                                                                                                                      | doctor, medicine manager               |
+| drug lists    | `GET /drug-lists/:owner`, `PUT`/`DELETE /drug-lists/:owner/items/:drugId`                                                                                                                                              | doctor, medicine manager               |
+| drugs         | `POST /drugs/:id/propose` — see **Companies and the review queue**                                                                                                                                                     | doctor, medicine manager               |
+| companies     | `GET`/`POST /companies`, `GET`/`PATCH /companies/:id`, `POST /companies/:id/suspend`, `/reactivate`                                                                                                                    | platform admin (reviewer: read)        |
+| company       | `GET /company`, `GET`/`POST /company/products`, `PATCH /company/products/:id`, `POST /company/products/:id/discontinue`, `/company/products/claim`, `/company/products/csv/check`, `/company/products/csv`             | company admin, company editor          |
+| submissions   | `GET /submissions`, `GET /submissions/:id`                                                                                                                                                                             | reviewer; a company or clinic, its own |
+| submissions   | `PATCH /submissions/:id`, `POST /submissions/:id/withdraw`                                                                                                                                                             | the company or clinic that sent it     |
+| submissions   | `POST /submissions/:id/approve`, `/reject`, `/request-changes`                                                                                                                                                         | platform admin, reviewer               |
+| announcements | `GET`/`POST /announcements`, `GET`/`PATCH /announcements/:id`, `POST /announcements/:id/publish`, `/withdraw`, `POST /announcements/images`, `/audience-count`, `GET /announcements/:id/stats` — see **Announcements** | platform admin, content manager        |
+| announcements | `GET /announcements/:id/registrations`, `GET /announcements/:id/registrations.csv`                                                                                                                                     | platform admin, content manager        |
+| announcements | `GET /announcements/slots?placement=`, `POST /announcements/:id/events`, `POST`/`DELETE /announcements/:id/reminder`, `POST`/`DELETE /announcements/:id/register`                                                      | doctor, PA, medicine manager           |
+| history       | `GET /patients/:id/history?kind=`                                                                                                                                                                                      | doctor                                 |
+| reports       | `POST /reports/uploads`, `POST`/`GET /patients/:id/reports`, `GET /reports/:id`                                                                                                                                        | doctor, PA                             |
+| reports       | `POST /reports/:id/review`                                                                                                                                                                                             | doctor                                 |
+| templates     | `GET`/`POST /templates`, `GET`/`PATCH`/`DELETE /templates/:id`, `POST /prescriptions/from-template/:id`                                                                                                                | doctor                                 |
+| settings      | `GET /settings`, `PATCH /settings/me` — see **Settings**                                                                                                                                                               | anyone in any organisation             |
+| settings      | `PATCH /settings/organisation`                                                                                                                                                                                         | by key: doctor, medicine manager       |
+| settings      | `PATCH /settings/platform`                                                                                                                                                                                             | platform admin                         |
+| files         | `GET`/`PUT /files/<key>?…&sig=` — local storage driver only                                                                                                                                                            | whoever holds the signed link          |
+| verify        | `GET /verify/:code`, `GET /verify/:code/qr.svg` — see **Verifying a printout**                                                                                                                                         | anyone, 30 a minute per address        |
+| portal        | `/portal/links`, and each record route under `/portal/links/:linkId` — see **The patient's area**                                                                                                                      | a signed-in person, by their link      |
 
 `GET /prescriptions` takes `from`, `to` (Karachi days, inclusive) and `q` (a
 patient's name, phone or MR number, matched as patient search matches them), and
@@ -545,9 +549,11 @@ anyone does, and `/me` lists the platform beside any clinic they work at.
 | set and lock the clinic's settings                                 | yes                            | no                            |
 | see a patient's online access, invite them, block or remove a link | yes                            | their own locations' patients |
 
-A **medicine manager** holds four actions and nothing else: `drug.search`,
-`drugList.read`, `drugList.clinic.manage` and `settings.read`. No patients, no
-visits, no prescriptions, no inbox. Like a doctor they reach every location, so
+A **medicine manager** holds these actions and nothing else: `drug.search`,
+`drugList.read`, `drugList.clinic.manage`, `settings.read`, `notification.read`
+and `announcement.view`. No patients, no visits, no prescriptions. Their inbox
+holds only what is addressed to them - the reminders they ask for - because a
+clinic's own notifications go to its doctors and assistants. Like a doctor they reach every location, so
 the apps' location handling needs no special case, and for the same reason they
 don't hear about those things over the realtime socket either: each topic names
 the action needed to hear it. A doctor also holds `drugList.own.manage`.
@@ -561,8 +567,13 @@ and lock settings for everyone (`settings.platform.update`). A `platformAdmin`
 also makes, edits and suspends companies (`company.create`, `company.update`,
 `company.suspend`) and manages the platform's staff (`member.*` but `update`). A
 `reviewer` reads companies (`company.read`) and decides the review queue
-(`submission.review`), which the admin may do too. `contentManager` holds
-nothing new yet: it waits for announcements.
+(`submission.review`), which the admin may do too. A `contentManager` and the
+admin write, publish and withdraw announcements (`announcement.read`,
+`announcement.create`, `announcement.publish`) and read who registered for one
+(`announcement.registrations.read`).
+
+Every clinic role - doctor, PA, medicine manager - holds `announcement.view`:
+seeing what is meant for them, reminding themselves and registering.
 
 A company's roles hold none of a clinic's actions either. Both send products to
 review (`drug.submit`) and read their own company (`company.profile.read`); a
@@ -601,7 +612,9 @@ it:
 A new setting is one entry. It needs no route, and a settings screen can be
 drawn from the registry. `GET /drugs` reads `medicines.source`: see **Medicines**.
 `portal.enabled` and `portal.invites` are a clinic's own, with no layer for a
-person: see **The patient's area**.
+person: see **The patient's area**. `announcements.sponsored` (on by default,
+set by a clinic or a person, lockable) hides sponsored announcements when off:
+see **Announcements**.
 
 **Who sets it for a clinic.** An entry may name its `organisationAction`, the
 action that sets it at the organisation layer; otherwise that is
@@ -669,8 +682,8 @@ stored value that the key's schema no longer accepts counts as unset.
 registry later, as platform- and organisation-layer settings, without the apps
 breaking.
 
-**Fields for targeting later.** Announcements will be aimed by specialty and
-place, so both are now structured:
+**Fields for targeting.** Announcements are aimed by specialty and place, so
+both are structured:
 
 - **Specialties:** a doctor's `specialties` come from `SPECIALTIES`
   ([src/shared/specialties.ts](src/shared/specialties.ts)), keys with English
@@ -845,8 +858,8 @@ the row it is about (`drugId`, none for a new product), a `status` (`pending`,
 note, and a history of every step with who and when. Each type's rules and its
 approval live in one handler in
 [src/services/submission.service.ts](src/services/submission.service.ts); the
-queue itself knows nothing about medicines, so `announcement.*` will be new types
-and handlers, not a new queue. Prescriptions never change on any approval: they
+queue itself knows nothing about medicines, so when companies write
+announcements they will be new types and handlers, not a new queue. Prescriptions never change on any approval: they
 keep their own copy of each line.
 
 - **A reviewer** (`GET /submissions`) sees every organisation's, filtered by
@@ -882,6 +895,109 @@ problem.
 manager, for one of the clinic's own active items, refused while one is already
 open. `GET /drug-lists/clinic` shows the latest proposal beside each item as
 `proposal: { id, type, status, note, updatedAt }`, null when there is none.
+
+## Announcements
+
+Seminars, events, updates and sponsored products, shown to clinic members in
+named slots. Separate from a clinic's own notifications ("patient added"),
+which stay as they are. The contract is
+[src/shared/announcement.schema.ts](src/shared/announcement.schema.ts); the
+console is [announcement.service.ts](src/services/announcement.service.ts) and
+what a member sees is
+[announcementSlot.service.ts](src/services/announcementSlot.service.ts).
+
+**Who writes them.** Only RxDictate's own team in this phase - a
+`platformAdmin` or a `contentManager` - including sponsored ones set up on a
+company's behalf. RxDictate is its own reviewer, so nothing goes through the
+review queue, and a published one may still be edited. Every step is kept in
+its `history` and the audit log.
+
+**What one has.**
+
+- `kind`: `seminar`, `event`, `update` or `product`.
+- `title` (at most 120), `body` (plain text, at most 1000), an optional image
+  and an optional `https` link.
+- `cta`: `register`, `learnMore`, `addToCalendar` or `none`. `register` and
+  `addToCalendar` only on a seminar or an event.
+- For a seminar or an event, `event: { startsAt, endsAt?, place?, onlineUrl? }`,
+  with a place, an online link or both.
+- For a product, `drugId`: an active national medicine, shown by its brand and
+  strength. A product always has a sponsor.
+- `sponsorId`: a company, or null for RxDictate's own. Anything with a sponsor,
+  and every product, is `isSponsored` and labelled "Sponsored".
+- `showFrom` and `showUntil`: the window.
+- `audience`, `placements`, `priority` and `maxShows` (below).
+- `status`: `draft`, `published` or `withdrawn`. "Ended" is not a status: the
+  views say `ended: true` for a published one whose window has passed.
+
+**The image.** As a report page is uploaded: `POST /announcements/images` with
+`{ contentType, size }` (JPEG or PNG, at most 2 MB) answers an upload ticket,
+the console PUTs the bytes, and hands the key back as `imageKey`. Only a key
+issued that way is accepted. Views carry a signed `image: { url, expiresAt }`.
+
+**Audience.** Lists of `roles` (`doctor`, `pa`, `medicineManager`),
+`specialties`, `provinces`, `cities`, `organisationIds` (clinics) and `userIds`.
+Each list that is filled must match, and an empty one matches everyone, so all
+empty is every clinic member. Never a patient, a company or the platform. A
+place matches the location the app is open at (`X-Location-Id`), or with none,
+any location the member works at. `POST /announcements/audience-count` with
+`{ audience }` says how many people that reaches now, a person in two clinics
+counting once; the slots and the count use the same rule
+(`matchesAudience`).
+
+**Placements.** `today.banner`, `sidebar.card` and `inbox.updates`
+(`announcementPlacementSchema`). `ANNOUNCEMENT_PLACEMENT_LIMITS` says how many
+each shows: one for the banner and the card, a list for the inbox. A new slot
+is one entry in each.
+
+**What a slot shows.** `GET /announcements/slots?placement=…` answers a list
+for every placement, at most the placement's limit long. In it: published ones
+inside their window whose audience includes this member, not dismissed by
+them, and under their cap - in order of `priority`, then newest. Sponsored ones
+are left out when the member's `announcements.sponsored` setting is off, and so
+are a suspended sponsor's and a product whose medicine is no longer active.
+Each carries this member's `reminded` and `registered`.
+
+**What the app reports.** `POST /announcements/:id/events` with
+`{ type: 'shown' | 'clicked' | 'dismissed' }`. The app sends `shown` when it
+actually draws one, and `maxShows` (null: until dismissed) counts those. A
+dismissed one never comes back to that person. Who saw what stays in
+`announcementStates` on the server; the console sees totals only.
+
+**Remind me.** `POST /announcements/:id/reminder` on a seminar or an event
+schedules bell notifications (`announcement.reminder`) a day before and an
+hour before it starts, skipping a time already past. `DELETE` cancels them.
+They are rows in a `jobs` collection that a timer in
+[src/index.ts](src/index.ts) sweeps every minute; each job is claimed before it
+runs, so it is sent once. Withdrawing the announcement cancels every reminder
+not yet sent, moving its start moves them, and one that falls due after the
+announcement was withdrawn or the event started is skipped.
+
+**Register.** `POST /announcements/:id/register` with `{ consent: true }` -
+nothing else will do - stores the person's name, phone and clinic for the
+organiser. Registering twice changes nothing. `DELETE` takes it back and
+deletes those details. The console reads them at
+`GET /announcements/:id/registrations` and as a file at
+`GET /announcements/:id/registrations.csv`.
+
+Reminders and registrations are refused on anything but a seminar or an event
+(`ANNOUNCEMENT_NOT_AN_EVENT`), on a withdrawn one (`ANNOUNCEMENT_WITHDRAWN`),
+and once its window has passed or the event has started (`ANNOUNCEMENT_ENDED`).
+One that isn't published, or isn't meant for the caller, is `NOT_FOUND`.
+
+**Measurement.** `GET /announcements/:id/stats`: `shows`, `clicks`,
+`dismissals`, `reminders` and `registrations`, as totals. A sponsor never gets
+individual doctors' data; registrations, given with consent, are the only
+exception.
+
+**Never.** No announcement appears in the consult or the prescription
+workspace, on the printout or its PDF, on anything a patient sees, on the
+verification page, or in medicine search and suggestions. Only the
+`/announcements` routes read them.
+
+**Live.** Publishing, editing a published one and withdrawing send
+`announcements` to every open clinic app, which refetches its slots. So does a
+change to `announcements.sponsored`.
 
 ## The patient's area
 
@@ -1339,7 +1455,9 @@ does not.
 `member.roleChanged`, `location.added`, `location.updated`,
 `location.archived`, `report.uploaded`, `report.reviewed`,
 `notification.created`, `notification.read`, `session.revoked`,
-`settings.changed`, `medicines.changed`, `patient.portalInvited`.
+`settings.changed`, `medicines.changed`, `patient.portalInvited`,
+`submission.changed`, `organisation.suspended`, `announcement.changed`,
+`announcement.reminderDue`.
 
 Services emit; [src/listeners](src/listeners) decides what they cause. No service
 calls notification, SMS or realtime code directly, so adding push later means
@@ -1389,21 +1507,22 @@ mobile app sends none and is let through, as on the HTTP API.
 **Topics.** Whoever made the change hears it too: they may have the app open on
 another device.
 
-| Topic           | Sent when                                                                                               | Sent to                                                                                                                      | `id`           |
-| --------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `visits`        | a visit is added to the day (by hand or by starting a prescription), changes status, moves in the order | sockets on that visit's location                                                                                             | visitId        |
-| `vitals`        | vitals recorded                                                                                         | sockets on that visit's location                                                                                             | visitId        |
-| `prescriptions` | approved, revised                                                                                       | sockets on the prescription's location                                                                                       | prescriptionId |
-| `appointments`  | booked, cancelled, or marked arrived because the patient was added to that day's list                   | sockets on the appointment's location                                                                                        | appointmentId  |
-| `patients`      | a patient is added or edited                                                                            | doctors, and assistants at a location the patient is linked to (`canSeePatient` in patient.service)                          | patientId      |
-| `reports`       | uploaded, reviewed (the first look only)                                                                | as `patients`, for the report's patient                                                                                      | reportId       |
-| `notifications` | one is written to this person's inbox, or theirs are marked read on any device                          | that person, in that clinic                                                                                                  | none           |
-| `team`          | a member is added or removed, or their locations or role change                                         | everyone in the clinic                                                                                                       | membershipId   |
-| `locations`     | a location is added, edited or archived                                                                 | everyone in the clinic                                                                                                       | locationId     |
-| `voice`         | a dictation segment is applied or fails                                                                 | the prescription's doctor                                                                                                    | prescriptionId |
-| `settings`      | a value or lock changes at a layer                                                                      | your own: that person in that clinic; a clinic's: everyone in it; the platform's: every socket                               | none           |
-| `medicines`     | a list, a clinic item or a typed row changes, or a proposal about a clinic item changes                 | a clinic's: everyone in it; a doctor's own: that doctor                                                                      | drugId         |
-| `submissions`   | a submission is sent, sent again, withdrawn or decided                                                  | the organisation that sent it, and the platform; heard by whoever holds `submission.review`, `drug.submit` or `drug.propose` | submissionId   |
+| Topic           | Sent when                                                                                                  | Sent to                                                                                                                      | `id`                                    |
+| --------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `visits`        | a visit is added to the day (by hand or by starting a prescription), changes status, moves in the order    | sockets on that visit's location                                                                                             | visitId                                 |
+| `vitals`        | vitals recorded                                                                                            | sockets on that visit's location                                                                                             | visitId                                 |
+| `prescriptions` | approved, revised                                                                                          | sockets on the prescription's location                                                                                       | prescriptionId                          |
+| `appointments`  | booked, cancelled, or marked arrived because the patient was added to that day's list                      | sockets on the appointment's location                                                                                        | appointmentId                           |
+| `patients`      | a patient is added or edited                                                                               | doctors, and assistants at a location the patient is linked to (`canSeePatient` in patient.service)                          | patientId                               |
+| `reports`       | uploaded, reviewed (the first look only)                                                                   | as `patients`, for the report's patient                                                                                      | reportId                                |
+| `notifications` | one is written to this person's inbox, or theirs are marked read on any device                             | that person, in that clinic                                                                                                  | none                                    |
+| `team`          | a member is added or removed, or their locations or role change                                            | everyone in the clinic                                                                                                       | membershipId                            |
+| `locations`     | a location is added, edited or archived                                                                    | everyone in the clinic                                                                                                       | locationId                              |
+| `voice`         | a dictation segment is applied or fails                                                                    | the prescription's doctor                                                                                                    | prescriptionId                          |
+| `settings`      | a value or lock changes at a layer                                                                         | your own: that person in that clinic; a clinic's: everyone in it; the platform's: every socket                               | none                                    |
+| `medicines`     | a list, a clinic item or a typed row changes, or a proposal about a clinic item changes                    | a clinic's: everyone in it; a doctor's own: that doctor                                                                      | drugId                                  |
+| `submissions`   | a submission is sent, sent again, withdrawn or decided                                                     | the organisation that sent it, and the platform; heard by whoever holds `submission.review`, `drug.submit` or `drug.propose` | submissionId                            |
+| `announcements` | an announcement is published, a published one is edited or withdrawn, or `announcements.sponsored` changes | every socket, heard only by whoever holds `announcement.view` (clinic members); for the setting, whoever it applies to       | announcementId, or none for the setting |
 
 A patient found by their whole phone number (the 30-minute introduction in
 patient.service) does not make anyone hear about them; links do.
@@ -1455,7 +1574,10 @@ in-process state to move at the same time.
   [src/index.ts](src/index.ts) are plain timers for the same reason.
 - **The review queue's edges.** No "Apply as a company" form yet (RxDictate
   makes every company), no scheduled DRAP import, and no reviewer console in the
-  mobile app. Announcements will be new submission types.
+  mobile app.
+- **Announcements by companies.** Only RxDictate's team writes them for now.
+  When companies do, theirs will be new submission types in the review queue.
+  Reminders reach the bell only, until push exists.
 - **No push.** `POST /devices` answers 501. The inbox itself is live and the
   rows have been written since the first commit, so there was nothing to
   backfill when it went in.

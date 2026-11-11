@@ -4,7 +4,7 @@ import { sendMemberAdded, sendOrganisationMemberAdded, sendPortalInvite } from '
 import { Membership, Practice, Prescription, User } from '../models';
 import { notify, notifyPractice } from '../services/notification.service';
 import { inviteAfterApproval, inviteUrl } from '../services/patientPortal.service';
-import { karachiDay } from '../utils/time';
+import { karachiClock, karachiDay } from '../utils/time';
 // What each write tells the open apps over the realtime socket. Imported for the side effect.
 import './realtime';
 
@@ -220,6 +220,19 @@ on('report.uploaded', async ({ practiceId, reportId, actorId }) => {
     body: 'A new report was attached to a patient.',
     actorId,
     roles: ['doctor'],
+  });
+});
+
+/** A reminder someone asked for: a day before a seminar or an event, and an hour before. */
+on('announcement.reminderDue', async ({ announcementId, practiceId, userId, lead, title, startsAt, place }) => {
+  const when = lead === 'day' ? `tomorrow at ${karachiClock(startsAt)}` : `at ${karachiClock(startsAt)}`;
+  await notify({
+    practiceId,
+    userId,
+    type: 'announcement.reminder',
+    refId: announcementId,
+    title,
+    body: `Starts ${when}${place ? `, ${place}` : ''}.`,
   });
 });
 

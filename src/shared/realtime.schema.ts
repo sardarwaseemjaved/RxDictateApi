@@ -37,6 +37,8 @@ export const realtimeTopicSchema = z.enum([
   'medicines',
   // The review queue: a reviewer's, and each sender's own. No location.
   'submissions',
+  // Announcements were published, edited or withdrawn: refetch the slots. Clinic members only.
+  'announcements',
 ]);
 export type RealtimeTopic = z.infer<typeof realtimeTopicSchema>;
 

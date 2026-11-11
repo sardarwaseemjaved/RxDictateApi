@@ -99,7 +99,8 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'appointment.create': ['doctor', 'pa'],
   'appointment.cancel': ['doctor', 'pa'],
 
-  'notification.read': ['doctor', 'pa'],
+  // A medicine manager too, so a reminder they asked for reaches a bell they can open.
+  'notification.read': ['doctor', 'pa', 'medicineManager'],
 
   // Everybody who works somewhere reads what applies to them and sets their
   // own, where the registry lets a person choose. Not a patient, who holds
@@ -124,8 +125,20 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   'company.update': ['platformAdmin'],
   'company.suspend': ['platformAdmin'],
 
-  // The review queue. contentManager gets nothing here yet: it is for announcements.
+  // The review queue. contentManager gets nothing here: it is for announcements.
   'submission.review': ['platformAdmin', 'reviewer'],
+
+  // Announcements are written and published by RxDictate's own team only,
+  // including sponsored ones set up for a company. RxDictate is its own
+  // reviewer, so nothing here goes through the review queue.
+  'announcement.read': ['platformAdmin', 'contentManager'],
+  'announcement.create': ['platformAdmin', 'contentManager'],
+  'announcement.publish': ['platformAdmin', 'contentManager'],
+  // Registrants' names and phones, which they agreed to give the organiser.
+  'announcement.registrations.read': ['platformAdmin', 'contentManager'],
+  // Everybody who works in a clinic sees what is meant for them. Never a
+  // patient, a company or the platform.
+  'announcement.view': ['doctor', 'pa', 'medicineManager'],
 };
 
 export const can = (role: Role, action: Action): boolean => PERMISSIONS[action].includes(role);

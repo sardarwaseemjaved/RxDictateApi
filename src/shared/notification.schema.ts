@@ -19,6 +19,8 @@ export const notificationTypeSchema = z.enum([
   'vitals.recorded',
   'appointment.booked',
   'voice.segmentFailed',
+  // A seminar or an event this person asked to be reminded of: a day before, and an hour before.
+  'announcement.reminder',
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 

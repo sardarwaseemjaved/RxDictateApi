@@ -49,4 +49,17 @@ export const parseCsv = (text: string): string[][] => {
   return rows;
 };
 
+/**
+ * A field as a spreadsheet will read it back. Quoted when it holds a comma, a
+ * quote or a line break. A field a spreadsheet would run as a formula gets a
+ * leading apostrophe; a phone number such as +92300... is left alone.
+ */
+const csvField = (value: string): string => {
+  const safe = /^[=@\t\r]/.test(value) || /^[+-](?![\d\s]*$)/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
+
+/** Rows as RFC 4180 CSV text, CRLF between rows, the way parseCsv reads them. */
+export const toCsv = (rows: string[][]): string => `${rows.map((row) => row.map(csvField).join(',')).join('\r\n')}\r\n`;
+
 export default parseCsv;

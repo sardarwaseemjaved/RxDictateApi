@@ -33,6 +33,20 @@ export { Session, type ISession, type SessionDoc, type SessionRevokedReason } fr
 export { Counter, type ICounter, type CounterDoc } from './counter.model';
 export { Setting, type ISetting, type SettingDoc } from './setting.model';
 export { Submission, QUEUE_RANK, type ISubmission, type ISubmissionStep, type SubmissionDoc } from './submission.model';
+export {
+  Announcement,
+  type IAnnouncement,
+  type IAnnouncementAudience,
+  type IAnnouncementEvent,
+  type AnnouncementDoc,
+} from './announcement.model';
+export { AnnouncementState, type IAnnouncementState, type AnnouncementStateDoc } from './announcementState.model';
+export {
+  AnnouncementRegistration,
+  type IAnnouncementRegistration,
+  type AnnouncementRegistrationDoc,
+} from './announcementRegistration.model';
+export { Job, JOB_TYPES, type IJob, type JobDoc, type JobStatus, type JobType } from './job.model';
 
 /* eslint-disable import/first */
 import { Practice } from './practice.model';
@@ -62,6 +76,10 @@ import { Session } from './session.model';
 import { Counter } from './counter.model';
 import { Setting } from './setting.model';
 import { Submission } from './submission.model';
+import { Announcement } from './announcement.model';
+import { AnnouncementState } from './announcementState.model';
+import { AnnouncementRegistration } from './announcementRegistration.model';
+import { Job } from './job.model';
 
 /**
  * Every collection, including the ones no route touches yet.
@@ -97,6 +115,10 @@ export const allModels = [
   Counter,
   Setting,
   Submission,
+  Announcement,
+  AnnouncementState,
+  AnnouncementRegistration,
+  Job,
 ];
 
 /**

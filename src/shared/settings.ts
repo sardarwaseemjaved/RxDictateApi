@@ -69,6 +69,17 @@ export const SETTINGS = {
     setBy: ['platform', 'organisation'],
     lockable: true,
   }),
+  /**
+   * Whether sponsored announcements show: anything with a sponsor, and every
+   * product. Off hides only those; RxDictate's own seminars, events and
+   * updates still show. A clinic may turn it off, and lock it, for everyone in it.
+   */
+  'announcements.sponsored': setting({
+    schema: z.boolean(),
+    default: true,
+    setBy: ['organisation', 'user'],
+    lockable: true,
+  }),
 };
 
 export type SettingKey = keyof typeof SETTINGS;

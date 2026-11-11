@@ -1,3 +1,4 @@
+export * as announcementController from './announcement.controller';
 export * as appointmentController from './appointment.controller';
 export * as authController from './auth.controller';
 export * as companyController from './company.controller';

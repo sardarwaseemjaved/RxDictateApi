@@ -10,13 +10,14 @@ import { backfillQueuePositions } from './services/visit.service';
 import { backfillPatientLocations } from './services/patient.service';
 import { backfillVerificationCodes } from './services/verify.service';
 import { backfillOrganisationTypes } from './services/organisation.service';
+import { runDueJobs } from './services/job.service';
 import { attachRealtime, type RealtimeServer } from './core/realtime';
 
 let server: Server | undefined;
 let realtime: RealtimeServer | undefined;
 
 /**
- * Two housekeeping jobs, on plain timers.
+ * Housekeeping and scheduled work, on plain timers.
  *
  * There is no queue in this product yet and these do not need one: both are
  * idempotent, both are cheap, and both would otherwise need a scheduler to be
@@ -32,6 +33,10 @@ let realtime: RealtimeServer | undefined;
  * - A session past its expiry is marked revoked, so it reads as ended rather
  *   than sitting there technically usable until Mongo's TTL removes it a month
  *   later.
+ * - Due jobs run: today, the reminders people asked for a day and an hour
+ *   before a seminar or an event. Every minute, so a reminder is at most a
+ *   minute late. Each job is claimed before it runs, so this stays safe with
+ *   more than one process.
  */
 const startSweeps = (): void => {
   const run = (what: string, job: () => Promise<number>) => {
@@ -41,10 +46,12 @@ const startSweeps = (): void => {
   run('stalled segment', sweepStalledSegments);
   run('audio retention', sweepExpiredAudio);
   run('expired session', markExpiredSessions);
+  run('due job', runDueJobs);
 
   setInterval(() => run('stalled segment', sweepStalledSegments), 5 * 60 * 1000).unref();
   setInterval(() => run('audio retention', sweepExpiredAudio), 6 * 60 * 60 * 1000).unref();
   setInterval(() => run('expired session', markExpiredSessions), 24 * 60 * 60 * 1000).unref();
+  setInterval(() => run('due job', runDueJobs), 60 * 1000).unref();
 };
 
 const start = async (): Promise<void> => {

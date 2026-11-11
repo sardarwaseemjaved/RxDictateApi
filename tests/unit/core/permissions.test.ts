@@ -95,7 +95,15 @@ describe('The permissions table', () => {
 
     test('a medicine manager gets exactly this and nothing else', () => {
       expect([...actionsFor('medicineManager')].sort()).toEqual(
-        ['drug.propose', 'drug.search', 'drugList.clinic.manage', 'drugList.read', 'settings.read'].sort(),
+        [
+          'drug.propose',
+          'drug.search',
+          'drugList.clinic.manage',
+          'drugList.read',
+          'settings.read',
+          'notification.read',
+          'announcement.view',
+        ].sort(),
       );
     });
 
@@ -137,10 +145,38 @@ describe('The permissions table', () => {
           'company.update',
           'company.suspend',
           'submission.review',
+          'announcement.read',
+          'announcement.create',
+          'announcement.publish',
+          'announcement.registrations.read',
         ].sort(),
       );
       expect([...actionsFor('reviewer')].sort()).toEqual(['company.read', 'settings.read', 'submission.review'].sort());
-      expect(actionsFor('contentManager')).toEqual(['settings.read']);
+      expect([...actionsFor('contentManager')].sort()).toEqual(
+        [
+          'settings.read',
+          'announcement.read',
+          'announcement.create',
+          'announcement.publish',
+          'announcement.registrations.read',
+        ].sort(),
+      );
+    });
+
+    test("only RxDictate's admin and content manager write announcements; every clinic role sees them, nobody else", () => {
+      (
+        ['announcement.read', 'announcement.create', 'announcement.publish', 'announcement.registrations.read'] as const
+      ).forEach((action) => {
+        expect({ action, roles: roleSchema.options.filter((role) => can(role, action)) }).toEqual({
+          action,
+          roles: ['platformAdmin', 'contentManager'],
+        });
+      });
+      expect(roleSchema.options.filter((role) => can(role, 'announcement.view'))).toEqual([
+        'doctor',
+        'pa',
+        'medicineManager',
+      ]);
     });
 
     test('a reviewer cannot make, change or suspend a company, or manage staff', () => {

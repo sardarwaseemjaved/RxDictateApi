@@ -1,5 +1,5 @@
 import type { Types } from 'mongoose';
-import { on } from '../core/events';
+import { on, type EventPayloads } from '../core/events';
 import { deliver, type Audience } from '../core/realtime';
 import { Patient, Practice, Prescription } from '../models';
 import type { ErrorCode } from '../shared/errorCodes';
@@ -133,16 +133,27 @@ on('voice.segmentFailed', ({ practiceId, prescriptionId, doctorId }) =>
   tell(member(practiceId, doctorId), 'voice', prescriptionId),
 );
 
-/* Settings, to whoever the changed layer applies to. */
-on('settings.changed', (change) => {
+/*
+ * Settings, to whoever the changed layer applies to. Turning sponsored
+ * announcements on or off also changes what their slots show.
+ */
+const settingsAudience = (change: EventPayloads['settings.changed']): Audience => {
   if (change.layer === 'user') {
-    tell(member(change.organisationId, change.userId), 'settings');
-  } else if (change.layer === 'organisation') {
-    tell(everyone(change.organisationId), 'settings');
-  } else {
-    tell({ to: 'all' }, 'settings');
+    return member(change.organisationId, change.userId);
+  }
+  return change.layer === 'organisation' ? everyone(change.organisationId) : { to: 'all' };
+};
+
+on('settings.changed', (change) => {
+  const audience = settingsAudience(change);
+  tell(audience, 'settings');
+  if (change.keys.includes('announcements.sponsored')) {
+    tell(audience, 'announcements');
   }
 });
+
+/* Announcements, to every open clinic app (deliver keeps it to clinic members), which refetches its slots. */
+on('announcement.changed', ({ announcementId }) => tell({ to: 'all' }, 'announcements', announcementId));
 
 /* Medicines, to whoever the changed list or item belongs to. */
 on('medicines.changed', (change) => {

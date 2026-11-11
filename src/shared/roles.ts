@@ -157,6 +157,16 @@ export const ACTIONS = [
 
   // Deciding what the review queue holds: approve, reject, or ask for changes.
   'submission.review',
+
+  // Announcements, in RxDictate's console: reading them, writing drafts and
+  // edits, and publishing or withdrawing them.
+  'announcement.read',
+  'announcement.create',
+  'announcement.publish',
+  // Who registered for a seminar or an event: their name, phone and clinic.
+  'announcement.registrations.read',
+  // A clinic member seeing what is meant for them, reminding themselves and registering.
+  'announcement.view',
 ] as const;
 
 export const actionSchema = z.enum(ACTIONS);

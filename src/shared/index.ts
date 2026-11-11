@@ -36,3 +36,4 @@ export * from './verify.schema';
 export * from './portal.schema';
 export * from './company.schema';
 export * from './submission.schema';
+export * from './announcement.schema';

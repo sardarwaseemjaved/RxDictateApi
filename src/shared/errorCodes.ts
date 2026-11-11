@@ -46,6 +46,12 @@ export const ERROR_CODES = [
   // The review queue
   'SUBMISSION_WRONG_STATUS',
 
+  // Announcements
+  'ANNOUNCEMENT_WRONG_STATUS',
+  'ANNOUNCEMENT_WITHDRAWN',
+  'ANNOUNCEMENT_ENDED',
+  'ANNOUNCEMENT_NOT_AN_EVENT',
+
   // Prescriptions
   'RX_LOCKED',
   'RX_NOT_DRAFT',
@@ -119,6 +125,15 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
 
   /** The submission is not in a state that allows this: approving a withdrawn one, editing a pending one. `details.status` says which. */
   SUBMISSION_WRONG_STATUS: 409,
+
+  /** The announcement is not in a state that allows this: publishing a withdrawn one, withdrawing a draft. `details.status` says which. */
+  ANNOUNCEMENT_WRONG_STATUS: 409,
+  /** RxDictate withdrew it: no reminder or registration any more. */
+  ANNOUNCEMENT_WITHDRAWN: 409,
+  /** Its window has passed, or for a reminder or a registration, the event has already started. */
+  ANNOUNCEMENT_ENDED: 409,
+  /** A reminder or a registration on something that is not a seminar or an event. */
+  ANNOUNCEMENT_NOT_AN_EVENT: 409,
 
   RX_LOCKED: 409,
   RX_NOT_DRAFT: 409,
