@@ -54,7 +54,12 @@ const aReport = async (doctor: SignedIn, patientId: string) =>
     await request(app)
       .post(`/api/v1/patients/${patientId}/reports`)
       .set(headersFor(doctor))
-      .send({ type: 'lab', testName: 'CBC', testDate: '2026-10-01', pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`] })
+      .send({
+        type: 'lab',
+        testName: 'CBC',
+        testDate: '2026-10-01',
+        pageKeys: [`${doctor.practiceId}/reports/pages/${'a'.repeat(24)}.jpg`],
+      })
       .expect(201)
   ).body.data.id as string;
 
@@ -99,7 +104,7 @@ describe('An assistant sees only the patients of their own locations', () => {
             type: 'lab',
             testName: 'CBC',
             testDate: '2026-10-01',
-            pageKeys: [`${doctor.practiceId}/reports/pages/b.jpg`],
+            pageKeys: [`${doctor.practiceId}/reports/pages/${'b'.repeat(24)}.jpg`],
           }),
       );
       notFound(await request(app).get(`/api/v1/reports/${reportId}`).set(headers));

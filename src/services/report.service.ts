@@ -5,7 +5,14 @@ import { BaseRepository, type Scope } from '../core/db';
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
-import { reportExtensionFor, reportPageKey, signedGetUrl, signedPutUrl } from '../core/storage';
+import {
+  isIssuedPageKey,
+  reportExtensionFor,
+  reportPageKey,
+  reportPagePrefix,
+  signedGetUrl,
+  signedPutUrl,
+} from '../core/storage';
 import type {
   CreateReportBody,
   CreateUploadBody,
@@ -52,10 +59,13 @@ export const createUpload = async (scope: Scope, body: CreateUploadBody): Promis
   return { uploadUrl: signed.url, fileKey: key, expiresAt: signed.expiresAt };
 };
 
-/** A key has to be one this practice was given, or a report could point anywhere. */
+/**
+ * A key has to be one this practice was given, or a report could point
+ * anywhere. The whole key is checked, not just its start: see isIssuedPageKey.
+ */
 const assertOwnKeys = (scope: Scope, pageKeys: string[]): void => {
-  const prefix = `${String(scope.practiceId)}/reports/pages/`;
-  const foreign = pageKeys.find((key) => !key.startsWith(prefix));
+  const prefix = reportPagePrefix(scope.practiceId);
+  const foreign = pageKeys.find((key) => !isIssuedPageKey(prefix, key));
   if (foreign) {
     throw new AppError('VALIDATION_ERROR', 'One of those page keys was not issued to this clinic.');
   }

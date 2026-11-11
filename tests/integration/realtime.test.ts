@@ -96,7 +96,12 @@ const aReport = async (doctor: SignedIn, patientId: string) =>
     await request(app)
       .post(`/api/v1/patients/${patientId}/reports`)
       .set(headersFor(doctor))
-      .send({ type: 'lab', testName: 'CBC', testDate: '2026-10-01', pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`] })
+      .send({
+        type: 'lab',
+        testName: 'CBC',
+        testDate: '2026-10-01',
+        pageKeys: [`${doctor.practiceId}/reports/pages/${'a'.repeat(24)}.jpg`],
+      })
       .expect(201)
   ).body.data.id as string;
 

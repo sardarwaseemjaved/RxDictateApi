@@ -22,7 +22,7 @@ import {
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
 import { emit } from '../core/events';
-import { portalReportPrefix, reportExtensionFor, signedGetUrl, signedPutUrl } from '../core/storage';
+import { isIssuedPageKey, portalReportPrefix, reportExtensionFor, signedGetUrl, signedPutUrl } from '../core/storage';
 import {
   portalFileLinkSchema,
   portalLinkViewSchema,
@@ -559,8 +559,6 @@ export const listVitals = async (
  * Uploading a report
  * ------------------------------------------------------------------ */
 
-const PAGE_NAME = /^[0-9a-f]{24}\.(jpg|png|pdf)$/;
-
 /** Step one: somewhere to PUT one page, under this link and no other. */
 export const createUpload = async ({ link }: PortalRecord, body: CreateUploadBody): Promise<UploadTicket> => {
   const name = `${randomBytes(12).toString('hex')}.${reportExtensionFor(body.contentType)}`;
@@ -580,7 +578,7 @@ export const createReport = async (
   body: PortalCreateReportBody,
 ): Promise<PortalReportView> => {
   const prefix = portalReportPrefix(link.practiceId, link._id);
-  const foreign = body.pageKeys.find((key) => !key.startsWith(prefix) || !PAGE_NAME.test(key.slice(prefix.length)));
+  const foreign = body.pageKeys.find((key) => !isIssuedPageKey(prefix, key));
   if (foreign) {
     throw new AppError('VALIDATION_ERROR', 'One of those page keys was not issued for this record.');
   }

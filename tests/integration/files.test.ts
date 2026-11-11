@@ -135,7 +135,7 @@ describe('Signed downloads from the local storage driver', () => {
         type: 'lab',
         testName: 'CBC',
         testDate: '2026-10-01',
-        pageKeys: [`${doctor.practiceId}/reports/pages/page-one.jpg`],
+        pageKeys: [`${doctor.practiceId}/reports/pages/${'c'.repeat(24)}.jpg`],
       })
       .expect(201);
 

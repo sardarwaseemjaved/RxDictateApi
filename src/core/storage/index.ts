@@ -77,8 +77,28 @@ export const reportKey = (
  * the URL before the report exists, and a key is not the place to record who a
  * document is about.
  */
+export const reportPagePrefix = (practiceId: Types.ObjectId | string): string => `${practiceId}/reports/pages/`;
+
 export const reportPageKey = (practiceId: Types.ObjectId | string, pageId: string, extension: string): string =>
-  `${practiceId}/reports/pages/${pageId}.${extension}`;
+  `${reportPagePrefix(practiceId)}${pageId}.${extension}`;
+
+/**
+ * The name an upload ticket gives a page: the 12 random bytes it was issued
+ * with, in hex, and one of the extensions a report page may have.
+ */
+const REPORT_PAGE_NAME = /^[0-9a-f]{24}\.(jpg|png|pdf)$/;
+
+/**
+ * Whether a key is one an upload ticket under this prefix could have issued:
+ * the prefix, then a page name and nothing else.
+ *
+ * Checking the start alone is not enough. `{prefix}../../../{other}/...` starts
+ * the right way and names somebody else's file, which a signed link to the
+ * report's pages would then read back. Staff and portal uploads both file
+ * through this, so the rule lives once.
+ */
+export const isIssuedPageKey = (prefix: string, key: string): boolean =>
+  key.startsWith(prefix) && REPORT_PAGE_NAME.test(key.slice(prefix.length));
 
 /**
  * Where a page a patient uploads lands, under the link it was issued to, so a
@@ -282,7 +302,14 @@ const localDriver = (): StorageDriver => {
   const resolveKey = (key: string): string => {
     const target = path.resolve(root, key);
     // A key comes from our own helpers, but it is still worth refusing one that
-    // climbs out of the storage root.
+    // climbs out of the storage root - or out of its own folder inside it:
+    // `A/reports/pages/../../../B/rx/x.pdf` never leaves the root, and is B's
+    // file. Keys are always plain `/`-separated names, so any `.`, `..` or
+    // empty segment, or a backslash, means one did not come from a helper.
+    const segments = key.split('/');
+    if (key.includes('\\') || segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+      throw new AppError('VALIDATION_ERROR', 'invalid storage key');
+    }
     if (!target.startsWith(`${root}${path.sep}`)) {
       throw new AppError('VALIDATION_ERROR', 'invalid storage key');
     }
@@ -404,7 +431,9 @@ export default {
   prescriptionPdfKey,
   prescriptionPreviewKey,
   reportKey,
+  reportPagePrefix,
   reportPageKey,
+  isIssuedPageKey,
   portalReportPrefix,
   extensionFor,
   reportExtensionFor,

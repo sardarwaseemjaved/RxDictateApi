@@ -200,7 +200,12 @@ describe('Every route in the product responds', () => {
     const report = await request(app)
       .post(`/api/v1/patients/${patientId}/reports`)
       .set(headersFor(doctor))
-      .send({ type: 'lab', testName: 'CBC', testDate: '2026-10-01', pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`] })
+      .send({
+        type: 'lab',
+        testName: 'CBC',
+        testDate: '2026-10-01',
+        pageKeys: [`${doctor.practiceId}/reports/pages/${'a'.repeat(24)}.jpg`],
+      })
       .expect(201);
     await request(app).post(`/api/v1/reports/${report.body.data.id}/review`).set(headersFor(doctor)).expect(200);
   });

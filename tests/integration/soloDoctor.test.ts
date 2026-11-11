@@ -316,7 +316,7 @@ describe('A doctor working alone', () => {
           type: 'lab',
           testName: 'CBC',
           testDate: '2026-10-01',
-          pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`],
+          pageKeys: [`${doctor.practiceId}/reports/pages/${'a'.repeat(24)}.jpg`],
         })
         .expect(201);
 
@@ -338,7 +338,7 @@ describe('A doctor working alone', () => {
           type: 'lab',
           testName: 'CBC',
           testDate: '2026-10-01',
-          pageKeys: [`${doctor.practiceId}/reports/pages/b.jpg`],
+          pageKeys: [`${doctor.practiceId}/reports/pages/${'b'.repeat(24)}.jpg`],
         })
         .expect(201);
 

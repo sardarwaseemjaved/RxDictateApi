@@ -45,7 +45,7 @@ const aReport = async (doctor: SignedIn, patientId: string) => {
       type: 'imaging',
       testName: 'Chest X-ray',
       testDate: '2026-09-30',
-      pageKeys: [`${doctor.practiceId}/reports/pages/x.jpg`],
+      pageKeys: [`${doctor.practiceId}/reports/pages/${'e'.repeat(24)}.jpg`],
     })
     .expect(201);
   return report.body.data.id as string;

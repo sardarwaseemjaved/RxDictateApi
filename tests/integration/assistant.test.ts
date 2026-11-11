@@ -422,7 +422,10 @@ describe('The assistant flow', () => {
           type: 'lab',
           testName: 'CBC',
           testDate: '2026-10-01',
-          pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`, `${doctor.practiceId}/reports/pages/b.jpg`],
+          pageKeys: [
+            `${doctor.practiceId}/reports/pages/${'a'.repeat(24)}.jpg`,
+            `${doctor.practiceId}/reports/pages/${'b'.repeat(24)}.jpg`,
+          ],
         })
         .expect(201);
 
@@ -516,7 +519,7 @@ describe('The assistant flow', () => {
           type: 'lab',
           testName: 'CBC',
           testDate: '2026-10-01',
-          pageKeys: [`${doctor.practiceId}/reports/pages/a.jpg`],
+          pageKeys: [`${doctor.practiceId}/reports/pages/${'a'.repeat(24)}.jpg`],
         })
         .expect(201);
       return created.body.data.id as string;
