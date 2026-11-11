@@ -828,6 +828,7 @@ paths:
       description: |
         Only rows this company owns: its approved products and the DRAP rows it claimed. Never usage,
         and never who prescribes them. What is still in review is in GET /submissions.
+        latestSubmission is the newest of the company's own submissions that names the product or made it.
       security: [{ bearerAuth: [] }]
       parameters:
         - { $ref: '#/components/parameters/PracticeId' }
@@ -885,6 +886,7 @@ paths:
         order; a company column is ignored. At most 500 rows. Each row says what it would become: new,
         update (one of this company's products), claim (a DRAP row nobody owns) or unchanged, or its
         problems. A missing column, no rows, or more than 500 is VALIDATION_ERROR for the whole file.
+        Problems are plain sentences to show as they are, such as "Enter the brand name".
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/PracticeId' }]
       responses:
@@ -971,6 +973,9 @@ paths:
         only its own, and organisationId is ignored. With no status, open ones come first (pending, then
         changesRequested, then the rest), each oldest sent first. Types are drug.create, drug.update,
         drug.discontinue, drug.claim and drug.propose.
+        Each view's subject names what it is about for a list row ({ brand, strength }): a new product
+        from its payload, anything else from the row drugId names, as it is now. Null only when there
+        is nothing to name it by.
       security: [{ bearerAuth: [] }]
       parameters:
         - { $ref: '#/components/parameters/PracticeId' }

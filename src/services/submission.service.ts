@@ -86,11 +86,36 @@ export interface Viewer {
 
 const isReviewer = (viewer: Viewer): boolean => viewer.organisationType === 'platform';
 
-const toView = (submission: SubmissionDoc, organisation: PracticeDoc | undefined, forReviewer: boolean): SubmissionView => ({
+type Subject = SubmissionView['subject'];
+
+const subjectOf = (brand: unknown, strength: unknown): Subject =>
+  typeof brand === 'string' && brand
+    ? { brand, strength: typeof strength === 'string' && strength ? strength : null }
+    : null;
+
+/**
+ * What it is about, for a list row: a new product by its payload, anything
+ * else by the row it names as that row is now. Null when that row is gone.
+ */
+const subjectFor = (submission: SubmissionDoc, drugs: Map<string, DrugDoc>): Subject => {
+  if (submission.type === 'drug.create') {
+    return subjectOf(submission.payload?.brand, submission.payload?.strength);
+  }
+  const drug = submission.drugId ? drugs.get(String(submission.drugId)) : undefined;
+  return drug ? subjectOf(drug.brand, drug.strength) : null;
+};
+
+const toView = (
+  submission: SubmissionDoc,
+  organisation: PracticeDoc | undefined,
+  subject: Subject,
+  forReviewer: boolean,
+): SubmissionView => ({
   id: String(submission._id),
   type: submission.type,
   status: submission.status,
   payload: submission.payload ?? {},
+  subject,
   organisation: {
     id: String(submission.practiceId),
     name: organisation?.name ?? '',
@@ -116,10 +141,18 @@ const toView = (submission: SubmissionDoc, organisation: PracticeDoc | undefined
   updatedAt: submission.updatedAt,
 });
 
+/** Views of a page of submissions: one query for their organisations and one for the rows they name. */
 const viewsOf = async (found: SubmissionDoc[], forReviewer: boolean): Promise<SubmissionView[]> => {
-  const organisations = await Practice.find({ _id: { $in: [...new Set(found.map((row) => String(row.practiceId)))] } });
+  const drugIds = [
+    ...new Set(found.flatMap((row) => (row.type !== 'drug.create' && row.drugId ? [String(row.drugId)] : []))),
+  ];
+  const [organisations, drugs] = await Promise.all([
+    Practice.find({ _id: { $in: [...new Set(found.map((row) => String(row.practiceId)))] } }),
+    drugIds.length > 0 ? Drug.find({ _id: { $in: drugIds } }).select('brand strength') : Promise.resolve([]),
+  ]);
   const byId = new Map(organisations.map((organisation) => [String(organisation._id), organisation]));
-  return found.map((row) => toView(row, byId.get(String(row.practiceId)), forReviewer));
+  const drugsById = new Map(drugs.map((drug) => [String(drug._id), drug]));
+  return found.map((row) => toView(row, byId.get(String(row.practiceId)), subjectFor(row, drugsById), forReviewer));
 };
 
 const viewOf = async (submission: SubmissionDoc, forReviewer: boolean): Promise<SubmissionView> =>

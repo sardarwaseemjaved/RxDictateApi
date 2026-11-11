@@ -70,6 +70,12 @@ export const submissionViewSchema = z.object({
   type: submissionTypeSchema,
   status: submissionStatusSchema,
   payload: z.record(z.string(), z.unknown()),
+  /**
+   * What the submission is about, in a few words, for a list row. A new
+   * product is named by its payload; anything else by the row `drugId` names,
+   * as that row is now. Null only when there is nothing to name it by.
+   */
+  subject: z.object({ brand: z.string(), strength: z.string().nullable() }).nullable(),
   /** Who sent it. */
   organisation: z.object({
     id: objectIdSchema,

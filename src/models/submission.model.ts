@@ -101,6 +101,8 @@ submissionSchema.index({ status: 1, type: 1, submittedAt: 1 });
 // A sender's own, and what is open about one row.
 submissionSchema.index({ practiceId: 1, queueRank: 1, submittedAt: 1 });
 submissionSchema.index({ drugId: 1, status: 1 });
+// The latest submission about a row includes the one that made it.
+submissionSchema.index({ resultDrugId: 1 }, { partialFilterExpression: { resultDrugId: { $type: 'objectId' } } });
 submissionSchema.index({ uploadId: 1 }, { partialFilterExpression: { uploadId: { $type: 'string' } } });
 
 export const Submission = mongoose.model<ISubmission, PaginateModel<ISubmission>>(

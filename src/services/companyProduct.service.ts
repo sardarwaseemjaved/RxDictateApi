@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import type { z } from 'zod';
 import { Drug, Submission, type DrugDoc } from '../models';
 import { AppError } from '../core/errors';
 import type { Scope } from '../core/db';
@@ -14,6 +15,7 @@ import {
   type ListCompanyProductsQuery,
   type ProductFields,
 } from '../shared/company.schema';
+import type { MedicineItem } from '../shared/prescription.schema';
 import { submissionTypeSchema } from '../shared/submissionStatus';
 import { parseCsv } from '../utils/csv';
 import { formFromFile } from './drugImport.service';
@@ -76,6 +78,62 @@ interface CheckedRow extends CsvRowCheck {
 }
 
 type Column = (typeof COMPANY_CSV_COLUMNS)[number];
+
+/** How a problem names each column, as the company's forms do. */
+const COLUMN_NAMES: Record<keyof ProductFields, string> = {
+  registrationNo: 'DRAP registration number',
+  brand: 'brand name',
+  composition: 'composition',
+  strength: 'strength',
+  form: 'form',
+  pack: 'pack',
+};
+
+/** What to ask for when a column the row needs is blank. */
+const MISSING: Record<keyof ProductFields, string> = {
+  registrationNo: 'Enter its DRAP registration number',
+  brand: 'Enter the brand name',
+  composition: 'Enter the composition',
+  strength: 'Enter the strength',
+  form: 'Choose a form',
+  pack: 'Enter the pack',
+};
+
+/** The forms as the apps show them, for the one sentence that lists them. */
+const FORM_NAMES: Record<MedicineItem['form'], string> = {
+  tab: 'Tablet',
+  cap: 'Capsule',
+  syp: 'Syrup',
+  inj: 'Injection',
+  drops: 'Drops',
+  cream: 'Cream',
+  ointment: 'Ointment',
+  sachet: 'Sachet',
+  spray: 'Spray',
+  other: 'Other',
+};
+
+/**
+ * One validation issue as a sentence the company can act on. The apps show
+ * problems as they are, so none of the validation library's own wording.
+ */
+const problemOf = (issue: z.core.$ZodIssue): string => {
+  const column = issue.path[0] as keyof ProductFields | undefined;
+  const name = column && column in COLUMN_NAMES ? COLUMN_NAMES[column] : null;
+  if (!column || !name) {
+    return 'This row could not be read';
+  }
+  if (issue.code === 'too_small' || (issue.code === 'invalid_type' && issue.input === undefined)) {
+    return MISSING[column];
+  }
+  if (issue.code === 'too_big') {
+    return `The ${name} is too long (at most ${String(issue.maximum)} characters)`;
+  }
+  if (column === 'form') {
+    return `The form isn't one of: ${Object.values(FORM_NAMES).join(', ')}`;
+  }
+  return `The ${name} isn't valid`;
+};
 
 /** The fields a row would change on the company's own product, or none. */
 const differences = (drug: DrugDoc, fields: ProductFields) =>
@@ -155,7 +213,7 @@ const checkRows = async (scope: Scope, csv: string): Promise<CheckedRow[]> => {
       pack: read(row, 'pack'),
     });
     if (!result.success) {
-      result.error.issues.forEach((issue) => problems.push(`${issue.path.join('.') || 'row'}: ${issue.message}`));
+      result.error.issues.forEach((issue) => problems.push(problemOf(issue)));
     }
     if (registrationNo && seen.has(registrationNo)) {
       problems.push('this registration number is already in the file');

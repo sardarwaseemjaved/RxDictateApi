@@ -429,7 +429,12 @@ describe('Review', () => {
     const before = await Drug.countDocuments();
 
     const sent = await sendProduct(companyAdmin).expect(201);
-    expect(sent.body.data.submission).toMatchObject({ type: 'drug.create', status: 'pending', drugId: null });
+    expect(sent.body.data.submission).toMatchObject({
+      type: 'drug.create',
+      status: 'pending',
+      drugId: null,
+      subject: { brand: 'Zentra', strength: '250mg' },
+    });
     expect(await Drug.countDocuments()).toBe(before);
     expect(await searchAs(doctor, 'zentra')).toEqual([]);
 
@@ -450,6 +455,17 @@ describe('Review', () => {
     expect(await searchAs(doctor, 'zentra')).toEqual(['Zentra']);
     expect(await AuditLog.countDocuments({ action: 'drug.create', entityId: row._id })).toBe(1);
     expect(await AuditLog.countDocuments({ action: 'submission.approve' })).toBe(1);
+    expect(approved.body.data.subject).toEqual({ brand: 'Zentra', strength: '250mg' });
+
+    // The product it made shows it as its latest review, though it named no product when sent.
+    const products = (await request(app).get('/api/v1/company/products').set(headersFor(companyAdmin)).expect(200)).body
+      .data;
+    expect(products).toHaveLength(1);
+    expect(products[0].latestSubmission).toMatchObject({
+      id: sent.body.data.submission.id,
+      type: 'drug.create',
+      status: 'approved',
+    });
   });
 
   test("a change and a discontinuation do exactly that, and nothing a doctor sees changes before they're approved", async () => {
@@ -464,6 +480,11 @@ describe('Review', () => {
       .expect(201);
     expect(change.body.data.submission.payload).toEqual({ brand: 'Zentra Forte', pack: '2x10' });
     expect(change.body.data.current.brand).toBe('Zentra');
+    expect(change.body.data.submission.subject).toEqual({ brand: 'Zentra', strength: '250mg' });
+    const queue = (
+      await request(app).get('/api/v1/submissions').query({ type: 'drug.update' }).set(headersFor(reviewer)).expect(200)
+    ).body.data;
+    expect(queue.map((item: { subject: unknown }) => item.subject)).toEqual([{ brand: 'Zentra', strength: '250mg' }]);
     expect((await Drug.findById(row._id))?.brand).toBe('Zentra');
     expect(await searchAs(doctor, 'zentra forte')).toEqual([]);
 
@@ -473,7 +494,8 @@ describe('Review', () => {
       .set(headersFor(companyAdmin))
       .expect(409);
 
-    await decide(reviewer, change.body.data.submission.id, 'approve').expect(200);
+    const changeApproved = await decide(reviewer, change.body.data.submission.id, 'approve').expect(200);
+    expect(changeApproved.body.data.subject).toEqual({ brand: 'Zentra Forte', strength: '250mg' });
     const changed = await Drug.findById(row._id);
     expect(changed).toMatchObject({ brand: 'Zentra Forte', pack: '2x10', strength: '250mg', status: 'active' });
     expect(await searchAs(doctor, 'zentra forte')).toEqual(['Zentra Forte']);
@@ -645,6 +667,12 @@ describe('Claim, publish and merge', () => {
       .send({ registrationNo: 'D-10' })
       .expect(201);
     expect((await Drug.findById(row._id))?.companyId).toBeNull();
+    expect(claim.body.data.submission).toMatchObject({
+      payload: { registrationNo: 'D-10' },
+      subject: { brand: 'Claimol', strength: '10mg' },
+    });
+    const own = (await request(app).get('/api/v1/submissions').set(headersFor(companyAdmin)).expect(200)).body.data;
+    expect(own.map((item: { subject: unknown }) => item.subject)).toEqual([{ brand: 'Claimol', strength: '10mg' }]);
     await decide(reviewer, claim.body.data.submission.id, 'approve').expect(200);
 
     const claimed = await Drug.findById(row._id);
@@ -796,6 +824,8 @@ describe('Products by CSV', () => {
       'D-30,Drapol,Drap,5mg,Tablet,10x10,',
       'O-9,Theirs,x,1mg,Tablet,1x1,',
       'N-2,,nothing,1mg,Tablet,1x1,',
+      ',Noreg,nothing,1mg,Tablet,1x1,',
+      `N-3,${'x'.repeat(201)},nothing,1mg,Tablet,1x1,`,
     ].join('\n');
 
     const checked = await request(app)
@@ -816,9 +846,15 @@ describe('Products by CSV', () => {
       [5, 'claim', false],
       [6, null, true],
       [7, null, true],
+      [8, null, true],
+      [9, null, true],
     ]);
     expect(checked.body.data.rows[4].problems).toEqual(['this registration number belongs to another company']);
-    expect(checked.body.data.counts).toEqual({ new: 1, update: 1, claim: 1, unchanged: 0, problems: 3 });
+    // Worded like the forms, never the validation library's own text.
+    expect(checked.body.data.rows[5].problems).toEqual(['Enter the brand name']);
+    expect(checked.body.data.rows[6].problems).toEqual(['Enter its DRAP registration number']);
+    expect(checked.body.data.rows[7].problems).toEqual(['The brand name is too long (at most 200 characters)']);
+    expect(checked.body.data.counts).toEqual({ new: 1, update: 1, claim: 1, unchanged: 0, problems: 5 });
 
     expect(await Submission.countDocuments()).toBe(submissionsBefore);
     expect(await Drug.countDocuments()).toBe(drugsBefore);

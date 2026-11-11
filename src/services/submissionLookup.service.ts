@@ -17,9 +17,10 @@ export const toSubmissionSummary = (submission: SubmissionDoc): SubmissionSummar
 });
 
 /**
- * By drug id. Only this organisation's own submissions, and only these types:
- * a company never sees a clinic's proposal about the same row, or the other
- * way round.
+ * By drug id. A submission is about a row when it names it (`drugId`) or,
+ * like an approved new product, made it (`resultDrugId`). Only this
+ * organisation's own submissions, and only these types: a company never sees
+ * a clinic's proposal about the same row, or the other way round.
  */
 export const latestSubmissionsFor = async (
   practiceId: Types.ObjectId,
@@ -29,16 +30,22 @@ export const latestSubmissionsFor = async (
   if (drugIds.length === 0) {
     return new Map();
   }
-  const found = await Submission.find({ practiceId, drugId: { $in: drugIds }, type: { $in: types } }).sort({
-    createdAt: -1,
-    _id: -1,
-  });
+  const found = await Submission.find({
+    practiceId,
+    type: { $in: types },
+    $or: [{ drugId: { $in: drugIds } }, { resultDrugId: { $in: drugIds } }],
+  }).sort({ createdAt: -1, _id: -1 });
+  const wanted = new Set(drugIds.map(String));
   const latest = new Map<string, SubmissionSummary>();
   found.forEach((submission) => {
-    const key = String(submission.drugId);
-    if (!latest.has(key)) {
-      latest.set(key, toSubmissionSummary(submission));
-    }
+    // Newest first, so the first one seen for a row is its latest. A merged
+    // proposal names one row and made another; each row keeps its own.
+    [submission.drugId, submission.resultDrugId].forEach((id) => {
+      const key = id ? String(id) : null;
+      if (key && wanted.has(key) && !latest.has(key)) {
+        latest.set(key, toSubmissionSummary(submission));
+      }
+    });
   });
   return latest;
 };
