@@ -48,8 +48,13 @@ export interface IAnnouncementStep {
  * announcement.service.
  *
  * `stats` holds the totals of what apps reported - shows and clicks - and
- * nothing about who. Who has seen or dismissed one, which the
- * cap needs, is in announcementStates and never leaves the server.
+ * nothing about who. Who has seen, clicked or dismissed one is in
+ * announcementStates; only RxDictate's admin reads it person by person
+ * (`announcement.people.read`), and a sponsor never does.
+ *
+ * `publishedAt` is set once, when a draft is published, and never moves:
+ * nothing returns a published one to draft. So it is also when it was first
+ * published, which is what a sponsor's allowance counts by.
  */
 export interface IAnnouncement {
   kind: AnnouncementKind;
@@ -72,6 +77,8 @@ export interface IAnnouncement {
   withdrawnAt: Date | null;
   stats: { shows: number; clicks: number };
   history: IAnnouncementStep[];
+  /** The company's `announcement.create` it was approved from, or null for one RxDictate wrote. */
+  submissionId: Types.ObjectId | null;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -139,6 +146,7 @@ const announcementSchema = new Schema<IAnnouncement>(
       clicks: { type: Number, default: 0 },
     },
     history: { type: [stepSchema], default: [] },
+    submissionId: { type: Schema.Types.ObjectId, ref: 'Submission', default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true },
@@ -152,6 +160,8 @@ announcementSchema.index({ status: 1, placements: 1, showFrom: 1, showUntil: 1 }
 // The console's list, newest first, by status, kind or sponsor.
 announcementSchema.index({ status: 1, createdAt: -1 });
 announcementSchema.index({ sponsorId: 1, createdAt: -1 });
+// A sponsor's posts in one month, for its allowance.
+announcementSchema.index({ sponsorId: 1, publishedAt: 1 });
 
 export const Announcement = mongoose.model<IAnnouncement, PaginateModel<IAnnouncement>>(
   'Announcement',

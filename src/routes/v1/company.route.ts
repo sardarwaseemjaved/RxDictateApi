@@ -9,7 +9,7 @@ import { requireCan } from '../../core/permissions';
 const router = express.Router();
 
 /**
- * A company's own portal: its profile and its products. Every route serves a
+ * A company's own portal: its profile, its products and its announcements. Every route serves a
  * company and nothing else, so X-Practice-Id is the company's id, and a
  * suspended company's members are refused by the same check.
  *
@@ -77,6 +77,45 @@ router.post(
   requireCan('drug.submit'),
   validate(companyValidation.discontinueProduct),
   companyController.discontinueProduct,
+);
+
+/*
+ * Announcements: one sent for review answers 201 with its submission. The
+ * list is every announcement the company sponsors, whoever wrote it, with
+ * totals only; registrations are for its own seminars and events. Images and
+ * the audience count are at /announcements/images and
+ * /announcements/audience-count, shared with the console.
+ */
+router.get(
+  '/announcements',
+  ...company,
+  requireCan('announcement.submit'),
+  validate(companyValidation.listAnnouncements),
+  companyController.listAnnouncements,
+);
+
+router.post(
+  '/announcements',
+  ...company,
+  requireCan('announcement.submit'),
+  validate(companyValidation.submitAnnouncement),
+  companyController.submitAnnouncement,
+);
+
+router.get(
+  '/announcements/:id/registrations',
+  ...company,
+  requireCan('announcement.submit'),
+  validate(companyValidation.listAnnouncementRegistrations),
+  companyController.listAnnouncementRegistrations,
+);
+
+router.get(
+  '/announcements/:id/registrations.csv',
+  ...company,
+  requireCan('announcement.submit'),
+  validate(companyValidation.announcementRegistrationsCsv),
+  companyController.announcementRegistrationsCsv,
 );
 
 export default router;

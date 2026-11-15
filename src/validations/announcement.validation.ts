@@ -1,6 +1,8 @@
 import { idParamSchema } from '../shared/common';
 import {
   announcementEventBodySchema,
+  announcementPeopleQuerySchema,
+  announcementReachQuerySchema,
   announcementSlotsQuerySchema,
   audienceCountBodySchema,
   createAnnouncementBodySchema,
@@ -22,6 +24,8 @@ export const changeStatus = { params: idParamSchema };
 export const createImageUpload = { body: createAnnouncementImageBodySchema };
 export const audienceCount = { body: audienceCountBodySchema };
 export const listRegistrations = { params: idParamSchema, query: listAnnouncementRegistrationsQuerySchema };
+export const searchPeople = { query: announcementPeopleQuerySchema };
+export const reach = { query: announcementReachQuerySchema };
 
 // A clinic member.
 export const slots = { query: announcementSlotsQuerySchema };

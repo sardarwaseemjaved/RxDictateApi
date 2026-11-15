@@ -9,6 +9,11 @@ import {
   updateCompanyBodySchema,
   updateProductBodySchema,
 } from '../shared/company.schema';
+import {
+  createCompanyAnnouncementBodySchema,
+  listAnnouncementRegistrationsQuerySchema,
+  listCompanyAnnouncementsQuerySchema,
+} from '../shared/announcement.schema';
 
 export const listCompanies = { query: listCompaniesQuerySchema };
 export const getCompany = { params: idParamSchema };
@@ -22,3 +27,8 @@ export const updateProduct = { params: idParamSchema, body: updateProductBodySch
 export const discontinueProduct = { params: idParamSchema };
 export const claimProduct = { body: claimProductBodySchema };
 export const csv = { body: companyCsvBodySchema };
+
+export const listAnnouncements = { query: listCompanyAnnouncementsQuerySchema };
+export const submitAnnouncement = { body: createCompanyAnnouncementBodySchema };
+export const listAnnouncementRegistrations = { params: idParamSchema, query: listAnnouncementRegistrationsQuerySchema };
+export const announcementRegistrationsCsv = { params: idParamSchema };

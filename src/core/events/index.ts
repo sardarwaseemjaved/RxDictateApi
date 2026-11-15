@@ -195,12 +195,17 @@ export interface EventPayloads {
   /** RxDictate suspended a company: its members' open apps are closed with ORGANISATION_SUSPENDED. */
   'organisation.suspended': { practiceId: Types.ObjectId; actorId: Types.ObjectId };
   /**
-   * An announcement was published, or a published one was edited or withdrawn.
-   * Every open clinic app refetches its slots; a draft's edits say nothing.
+   * An announcement was made from a company's submission, published, edited
+   * or withdrawn. `toClinics` when it is no longer a draft: every open clinic
+   * app refetches its slots. `sponsorIds` are the companies whose own list it
+   * is on (two when an edit moved it from one to another), which hear any
+   * change to theirs, a draft's included.
    */
   'announcement.changed': {
     announcementId: Types.ObjectId;
-    change: 'published' | 'edited' | 'withdrawn';
+    change: 'created' | 'published' | 'edited' | 'withdrawn';
+    toClinics: boolean;
+    sponsorIds: Types.ObjectId[];
     actorId: Types.ObjectId;
   };
   /** A reminder someone asked for is due: a day or an hour before a seminar or an event starts. */

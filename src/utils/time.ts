@@ -46,3 +46,15 @@ export const ageFromDob = (dob: string, now: Date = new Date()): number | null =
 export const addDays = (instant: Date, days: number): Date => new Date(instant.getTime() + days * MS_PER_DAY);
 
 export const addMinutes = (instant: Date, minutes: number): Date => new Date(instant.getTime() + minutes * MS_PER_MINUTE);
+
+/** The Karachi calendar month of an instant, as `YYYY-MM`. */
+export const karachiMonth = (instant: Date = new Date()): string => karachiDay(instant).slice(0, 7);
+
+/** The UTC instants a Karachi calendar month (`YYYY-MM`) starts and ends at. */
+export const karachiMonthRange = (month: string): { start: Date; end: Date } => {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const startUtc = Date.UTC(year, monthNumber - 1, 1);
+  const endUtc = Date.UTC(year, monthNumber, 1);
+  const offset = KARACHI_OFFSET_MINUTES * MS_PER_MINUTE;
+  return { start: new Date(startUtc - offset), end: new Date(endUtc - offset) };
+};

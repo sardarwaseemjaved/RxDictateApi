@@ -149,6 +149,7 @@ describe('The permissions table', () => {
           'announcement.create',
           'announcement.publish',
           'announcement.registrations.read',
+          'announcement.people.read',
         ].sort(),
       );
       expect([...actionsFor('reviewer')].sort()).toEqual(['company.read', 'settings.read', 'submission.review'].sort());
@@ -179,18 +180,36 @@ describe('The permissions table', () => {
       ]);
     });
 
+    test("who saw what is RxDictate's admin's alone; a company's senders send announcements for review", () => {
+      expect(roleSchema.options.filter((role) => can(role, 'announcement.people.read'))).toEqual(['platformAdmin']);
+      expect(roleSchema.options.filter((role) => can(role, 'announcement.submit'))).toEqual([
+        'companyAdmin',
+        'companyEditor',
+      ]);
+      // Whoever sends a company's products sends its announcements.
+      expect(roleSchema.options.filter((role) => can(role, 'drug.submit'))).toEqual(['companyAdmin', 'companyEditor']);
+    });
+
     test('a reviewer cannot make, change or suspend a company, or manage staff', () => {
       (['company.create', 'company.update', 'company.suspend', 'member.add', 'member.remove'] as const).forEach((action) => {
         expect({ action, allowed: can('reviewer', action) }).toEqual({ action, allowed: false });
       });
     });
 
-    test("a company's roles send products and nothing of a clinic's; only its admin manages staff", () => {
+    test("a company's roles send products and announcements and nothing of a clinic's; only its admin manages staff", () => {
       expect([...actionsFor('companyEditor')].sort()).toEqual(
-        ['company.profile.read', 'drug.submit', 'settings.read'].sort(),
+        ['announcement.submit', 'company.profile.read', 'drug.submit', 'settings.read'].sort(),
       );
       expect([...actionsFor('companyAdmin')].sort()).toEqual(
-        ['company.profile.read', 'drug.submit', 'member.add', 'member.read', 'member.remove', 'settings.read'].sort(),
+        [
+          'announcement.submit',
+          'company.profile.read',
+          'drug.submit',
+          'member.add',
+          'member.read',
+          'member.remove',
+          'settings.read',
+        ].sort(),
       );
       expect(can('companyAdmin', 'member.update')).toBe(false);
       expect(can('companyAdmin', 'drug.search')).toBe(false);

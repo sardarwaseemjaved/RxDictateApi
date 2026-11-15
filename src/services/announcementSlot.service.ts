@@ -174,16 +174,36 @@ const isRegistered = async (announcementId: Types.ObjectId, userId: Types.Object
 
 /**
  * `POST /announcements/:id/events`. `shown` is what the cap counts, so an app
- * sends it when it actually draws one. Totals go on the announcement; who saw
- * it stays in this person's own state.
+ * sends it when it actually draws one. Totals go on the announcement, and the
+ * same counts, with when it was first and last shown, on this person's own
+ * state, which only RxDictate's admin reads person by person.
+ *
+ * Clicks have been kept per person since phase 6. Before that a click went on
+ * the announcement's total alone, so whose those were cannot be recovered,
+ * and older states read 0 clicks and no show times.
  */
 export const recordEvent = async (scope: Scope, id: string, type: AnnouncementEventType): Promise<AnnouncementStateView> => {
   const announcement = await reachable(scope, id);
   let state = await stateFor(announcement._id, scope.actorId);
   if (type === 'shown') {
-    state = (await AnnouncementState.findByIdAndUpdate(state._id, { $inc: { shows: 1 } }, { new: true }))!;
+    const now = new Date();
+    // A pipeline update, so the first show is set only when there is none, in the same write.
+    state = (await AnnouncementState.findByIdAndUpdate(
+      state._id,
+      [
+        {
+          $set: {
+            shows: { $add: [{ $ifNull: ['$shows', 0] }, 1] },
+            firstShownAt: { $ifNull: ['$firstShownAt', now] },
+            lastShownAt: now,
+          },
+        },
+      ],
+      { new: true },
+    ))!;
     await Announcement.updateOne({ _id: announcement._id }, { $inc: { 'stats.shows': 1 } });
   } else if (type === 'clicked') {
+    state = (await AnnouncementState.findByIdAndUpdate(state._id, { $inc: { clicks: 1 } }, { new: true }))!;
     await Announcement.updateOne({ _id: announcement._id }, { $inc: { 'stats.clicks': 1 } });
   } else if (!state.dismissedAt) {
     state = (await AnnouncementState.findByIdAndUpdate(state._id, { $set: { dismissedAt: new Date() } }, { new: true }))!;

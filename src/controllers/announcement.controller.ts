@@ -1,4 +1,5 @@
 import { auditScope } from '../core/audit';
+import { can } from '../core/permissions';
 import * as announcementService from '../services/announcement.service';
 import * as announcementSlotService from '../services/announcementSlot.service';
 import catchAsync from '../utils/catchAsync';
@@ -6,6 +7,8 @@ import { parsedBody, parsedQuery } from '../utils/request';
 import { sendCreated, sendData } from '../utils/response';
 import type {
   AnnouncementEventBody,
+  AnnouncementPeopleQuery,
+  AnnouncementReachQuery,
   AnnouncementSlotsQuery,
   AudienceCountBody,
   CreateAnnouncementBody,
@@ -23,8 +26,20 @@ export const searchProducts = catchAsync(async (req, res) => {
 });
 
 export const listAnnouncements = catchAsync(async (req, res) => {
-  const { announcements, meta } = await announcementService.listAnnouncements(parsedQuery<ListAnnouncementsQuery>(req));
+  const { announcements, meta } = await announcementService.listAnnouncements(
+    auditScope(req),
+    parsedQuery<ListAnnouncementsQuery>(req),
+  );
   sendData(res, announcements, meta);
+});
+
+export const searchPeople = catchAsync(async (req, res) => {
+  sendData(res, await announcementService.searchPeople(parsedQuery<AnnouncementPeopleQuery>(req)));
+});
+
+export const reach = catchAsync(async (req, res) => {
+  const { rows, meta } = await announcementService.reach(auditScope(req), parsedQuery<AnnouncementReachQuery>(req));
+  sendData(res, rows, meta);
 });
 
 export const getAnnouncement = catchAsync(async (req, res) => {
@@ -57,8 +72,10 @@ export const createImageUpload = catchAsync(async (req, res) => {
   );
 });
 
+/** The console counts any audience; a company, which cannot read announcements, only one by rule. */
 export const audienceCount = catchAsync(async (req, res) => {
-  sendData(res, await announcementService.audienceCount(parsedBody<AudienceCountBody>(req).audience));
+  const byRuleOnly = !can(req.ctx!.role, 'announcement.read');
+  sendData(res, await announcementService.audienceCount(parsedBody<AudienceCountBody>(req).audience, byRuleOnly));
 });
 
 export const getStats = catchAsync(async (req, res) => {

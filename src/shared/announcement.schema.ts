@@ -5,10 +5,11 @@ import { specialtySchema } from './specialties';
 import { medicineFormSchema } from './prescription.schema';
 
 /**
- * Announcements: seminars, events, updates and sponsored products, written and
- * published by RxDictate's own team and shown to clinic members in named
- * slots. Separate from a clinic's own notifications ("patient added"), which
- * stay as they are.
+ * Announcements: seminars, events, updates and sponsored products, published
+ * by RxDictate's own team and shown to clinic members in named slots. A
+ * company may send its own through the review queue; approving it makes a
+ * draft here, which RxDictate publishes. Separate from a clinic's own
+ * notifications ("patient added"), which stay as they are.
  *
  * Never in the consult, on the printout or PDF, on anything a patient sees, on
  * the verification page, or in medicine search and suggestions. Nothing paid
@@ -219,6 +220,58 @@ const announcementRules = (
 export const createAnnouncementBodySchema = z.object(announcementFields).superRefine(announcementRules);
 export type CreateAnnouncementBody = z.infer<typeof createAnnouncementBodySchema>;
 
+/* ------------------------------------------------------------------ *
+ * A company's own, sent for review
+ * ------------------------------------------------------------------ */
+
+/**
+ * The audience a company may ask for: by rule only. A company never names
+ * clinics or people, since it must not learn who works where, so naming
+ * either is a VALIDATION_ERROR rather than being dropped.
+ */
+export const companyAnnouncementAudienceSchema = announcementAudienceSchema
+  .pick({ roles: true, specialties: true, provinces: true, cities: true })
+  .strict();
+export type CompanyAnnouncementAudience = z.infer<typeof companyAnnouncementAudienceSchema>;
+
+/**
+ * Stands in for the sponsor when the rules run on a company's payload: the
+ * sender is always the sponsor. Whether a product is the sender's own is
+ * checked by the server, which knows who sent it.
+ */
+const THE_SENDER = 'the sender';
+
+/**
+ * `POST /company/announcements`, and the payload of an `announcement.create`
+ * submission. What it says, with the same fields and rules as the console's,
+ * and the dates and audience the company would like.
+ *
+ * Never in it, and refused if sent: `sponsorId` (the sender), `placements`,
+ * `priority` and `maxShows`, which are RxDictate's to choose when it
+ * publishes. A `product` names one of the sender's own active medicines.
+ */
+export const companyAnnouncementPayloadSchema = z
+  .object({
+    kind: announcementFields.kind,
+    title: announcementFields.title,
+    body: announcementFields.body,
+    imageKey: announcementFields.imageKey,
+    link: announcementFields.link,
+    cta: announcementFields.cta,
+    event: announcementFields.event,
+    drugId: announcementFields.drugId,
+    showFrom: announcementFields.showFrom,
+    showUntil: announcementFields.showUntil,
+    audience: companyAnnouncementAudienceSchema.default({ roles: [], specialties: [], provinces: [], cities: [] }),
+  })
+  .strict()
+  .superRefine((value, ctx) => announcementRules({ ...value, sponsorId: THE_SENDER }, ctx));
+export type CompanyAnnouncementPayload = z.infer<typeof companyAnnouncementPayloadSchema>;
+
+/** `POST /company/announcements`: the payload itself. Answers the pending submission. */
+export const createCompanyAnnouncementBodySchema = companyAnnouncementPayloadSchema;
+export type CreateCompanyAnnouncementBody = CompanyAnnouncementPayload;
+
 /**
  * `PATCH /announcements/:id`: only what changes. `audience` and `event` are
  * replaced whole. The result is checked by the same rules as a new one. A
@@ -255,6 +308,12 @@ export const listAnnouncementsQuerySchema = paginationQuerySchema.extend({
   kind: announcementKindSchema.optional(),
   /** A company's id, or `none` for RxDictate's own. */
   sponsorId: z.union([objectIdSchema, z.literal('none')]).optional(),
+  /**
+   * One person: what they are in the audience of now, and anything they have
+   * been shown, dismissed, been reminded of or registered for. Each row then
+   * carries `forPerson`. Needs `announcement.people.read`, and is audited.
+   */
+  userId: objectIdSchema.optional(),
 });
 export type ListAnnouncementsQuery = z.infer<typeof listAnnouncementsQuerySchema>;
 
@@ -286,6 +345,38 @@ export const createAnnouncementImageBodySchema = z.object({
 });
 export type CreateAnnouncementImageBody = z.infer<typeof createAnnouncementImageBodySchema>;
 
+/**
+ * `GET /announcements/people`: clinic members to choose by name. Matches a
+ * name anywhere in it, ignoring case, or a phone typed local (`0300…`) or in
+ * E.164, from its start. Only people active in an active clinic, in a clinic
+ * role: never a patient, a company's member or the platform's.
+ */
+export const announcementPeopleQuerySchema = z.object({
+  q: z.string().trim().min(2).max(120),
+  /** Only people who hold this role in at least one clinic. The console sends `doctor`. */
+  role: audienceRoleSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type AnnouncementPeopleQuery = z.infer<typeof announcementPeopleQuerySchema>;
+
+/**
+ * One clinic member, as the console names them. `roles`, `clinics` and
+ * `cities` are across the clinics they are active in now, so someone who has
+ * left every clinic has all three empty.
+ */
+export const announcementPersonViewSchema = z.object({
+  id: objectIdSchema,
+  name: z.string(),
+  /** E.164. */
+  phone: z.string(),
+  roles: z.array(audienceRoleSchema),
+  specialties: z.array(specialtySchema),
+  clinics: z.array(z.object({ id: objectIdSchema, name: z.string() })),
+  /** Where their clinics' active locations are. */
+  cities: z.array(z.string()),
+});
+export type AnnouncementPersonView = z.infer<typeof announcementPersonViewSchema>;
+
 /** `POST /announcements/audience-count`: an audience, typically the one being edited. */
 export const audienceCountBodySchema = z.object({ audience: announcementAudienceSchema });
 export type AudienceCountBody = z.infer<typeof audienceCountBodySchema>;
@@ -306,6 +397,25 @@ const sponsorViewSchema = z.object({ id: objectIdSchema, name: z.string() });
 
 /** The product a `product` announcement is about, as doctors see it named. */
 const productViewSchema = z.object({ id: objectIdSchema, brand: z.string(), strength: z.string() });
+
+/**
+ * One person's own record of one announcement, on a row of
+ * `GET /announcements?userId=`. Clicks and when it was first and last shown
+ * were only kept per person from phase 6: before that a click was counted on
+ * the announcement alone, so an older click reads as 0 here.
+ */
+export const announcementForPersonViewSchema = z.object({
+  /** In its audience by the rules, through any clinic they are active in now. */
+  inAudience: z.boolean(),
+  shows: z.number().int(),
+  clicks: z.number().int(),
+  dismissed: z.boolean(),
+  reminded: z.boolean(),
+  registered: z.boolean(),
+  firstShownAt: z.coerce.date().nullable(),
+  lastShownAt: z.coerce.date().nullable(),
+});
+export type AnnouncementForPersonView = z.infer<typeof announcementForPersonViewSchema>;
 
 export const announcementStepSchema = z.enum(['created', 'edited', 'published', 'withdrawn']);
 export type AnnouncementStep = z.infer<typeof announcementStepSchema>;
@@ -351,6 +461,11 @@ export const announcementViewSchema = z.object({
     organisationIds: z.array(objectIdSchema),
     userIds: z.array(objectIdSchema),
   }),
+  /**
+   * The people `audience.userIds` names, in that order, so the editor shows
+   * them by name. Someone deleted altogether is left out.
+   */
+  people: z.array(announcementPersonViewSchema),
   placements: z.array(announcementPlacementSchema),
   priority: z.number().int(),
   maxShows: z.number().int().nullable(),
@@ -360,6 +475,10 @@ export const announcementViewSchema = z.object({
   publishedAt: z.coerce.date().nullable(),
   withdrawnAt: z.coerce.date().nullable(),
   history: z.array(announcementHistoryEntrySchema),
+  /** The company's submission it was approved from, or null for one RxDictate wrote. */
+  submissionId: objectIdSchema.nullable(),
+  /** Filled only on `GET /announcements?userId=`: that person's record of it. */
+  forPerson: announcementForPersonViewSchema.nullable(),
   createdBy: objectIdSchema,
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
@@ -393,6 +512,95 @@ export type AnnouncementRegistrationView = z.infer<typeof announcementRegistrati
 
 export const listAnnouncementRegistrationsQuerySchema = paginationQuerySchema;
 export type ListAnnouncementRegistrationsQuery = z.infer<typeof listAnnouncementRegistrationsQuerySchema>;
+
+/**
+ * `GET /announcements/reach`: who was shown a company's announcements, or
+ * one announcement's, person by person. Exactly one of `sponsorId` (a
+ * company, or `none` for RxDictate's own) and `announcementId`. Needs
+ * `announcement.people.read`, and is audited.
+ */
+export const announcementReachQuerySchema = paginationQuerySchema
+  .extend({
+    sponsorId: z.union([objectIdSchema, z.literal('none')]).optional(),
+    announcementId: objectIdSchema.optional(),
+  })
+  .superRefine((query, ctx) => {
+    if ((query.sponsorId === undefined) === (query.announcementId === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['sponsorId'], message: 'send exactly one of sponsorId and announcementId' });
+    }
+  });
+export type AnnouncementReachQuery = z.infer<typeof announcementReachQuerySchema>;
+
+/** One person shown at least one of them. Rows come most shows first. */
+export const announcementReachRowSchema = z.object({
+  person: announcementPersonViewSchema,
+  /** How many different announcements they were shown. */
+  announcements: z.number().int(),
+  shows: z.number().int(),
+  clicks: z.number().int(),
+  /** How many of them they dismissed. */
+  dismissed: z.number().int(),
+  lastShownAt: z.coerce.date().nullable(),
+});
+export type AnnouncementReachRow = z.infer<typeof announcementReachRowSchema>;
+
+/* ------------------------------------------------------------------ *
+ * A company's allowance
+ * ------------------------------------------------------------------ */
+
+/**
+ * What RxDictate lets a company publish. Null is no limit, which is where
+ * every company starts. Counted on announcements with the company as
+ * sponsor, whoever wrote them.
+ *
+ * - `postsPerMonth`: published in one Asia/Karachi calendar month, counted in
+ *   the month each was first published. A draft does not count; one withdrawn
+ *   after publishing still does.
+ * - `peoplePerPost`: how many people one announcement's audience may reach,
+ *   as `POST /announcements/audience-count` counts them.
+ */
+export const announcementAllowanceSchema = z.object({
+  postsPerMonth: z.number().int().min(1).max(1000).nullable(),
+  peoplePerPost: z.number().int().min(1).max(1_000_000).nullable(),
+});
+export type AnnouncementAllowance = z.infer<typeof announcementAllowanceSchema>;
+
+export const announcementAllowanceViewSchema = announcementAllowanceSchema.extend({
+  /** Posts that count against this month. */
+  usedThisMonth: z.number().int(),
+  /** This month in Asia/Karachi, `YYYY-MM`. */
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+});
+export type AnnouncementAllowanceView = z.infer<typeof announcementAllowanceViewSchema>;
+
+/* ------------------------------------------------------------------ *
+ * What a company sees of its own
+ * ------------------------------------------------------------------ */
+
+/** `GET /company/announcements`: every announcement with this company as sponsor, newest first. */
+export const listCompanyAnnouncementsQuerySchema = paginationQuerySchema;
+export type ListCompanyAnnouncementsQuery = z.infer<typeof listCompanyAnnouncementsQuerySchema>;
+
+/**
+ * One of them, as the company sees it: what it is, where it stands, and
+ * totals. Never its audience, the people it names, its priority or who was
+ * shown it.
+ */
+export const companyAnnouncementViewSchema = z.object({
+  id: objectIdSchema,
+  kind: announcementKindSchema,
+  title: z.string(),
+  status: announcementStatusSchema,
+  ended: z.boolean(),
+  showFrom: z.coerce.date(),
+  showUntil: z.coerce.date(),
+  publishedAt: z.coerce.date().nullable(),
+  /** The submission it came from, or null for one RxDictate wrote for the company. */
+  submissionId: objectIdSchema.nullable(),
+  product: productViewSchema.nullable(),
+  stats: announcementStatsViewSchema,
+});
+export type CompanyAnnouncementView = z.infer<typeof companyAnnouncementViewSchema>;
 
 /* ------------------------------------------------------------------ *
  * What a clinic member sees

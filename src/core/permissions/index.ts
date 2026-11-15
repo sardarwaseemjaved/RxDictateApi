@@ -128,9 +128,9 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   // The review queue. contentManager gets nothing here: it is for announcements.
   'submission.review': ['platformAdmin', 'reviewer'],
 
-  // Announcements are written and published by RxDictate's own team only,
-  // including sponsored ones set up for a company. RxDictate is its own
-  // reviewer, so nothing here goes through the review queue.
+  // Announcements are written and published by RxDictate's own team,
+  // including sponsored ones set up for a company. A company's own arrive
+  // through the review queue as drafts, and are published here too.
   'announcement.read': ['platformAdmin', 'contentManager'],
   'announcement.create': ['platformAdmin', 'contentManager'],
   'announcement.publish': ['platformAdmin', 'contentManager'],
@@ -139,6 +139,12 @@ const PERMISSIONS: Record<Action, readonly Role[]> = {
   // Everybody who works in a clinic sees what is meant for them. Never a
   // patient, a company or the platform.
   'announcement.view': ['doctor', 'pa', 'medicineManager'],
+  // A company's own announcement goes through the review queue, sent by
+  // whoever sends its products. Approving makes a draft RxDictate publishes.
+  'announcement.submit': ['companyAdmin', 'companyEditor'],
+  // Which doctors were shown, clicked or dismissed what. Only RxDictate's
+  // admin: not a content manager, and never a company, which sees totals.
+  'announcement.people.read': ['platformAdmin'],
 };
 
 export const can = (role: Role, action: Action): boolean => PERMISSIONS[action].includes(role);

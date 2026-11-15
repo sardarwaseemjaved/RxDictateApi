@@ -35,8 +35,12 @@ import {
 } from '../shared/submission.schema';
 import type { SubmissionStatus, SubmissionType } from '../shared/submissionStatus';
 import type { ClaimProductBody, ProductFields, UpdateProductBody } from '../shared/company.schema';
+import type { CompanyAnnouncementPayload } from '../shared/announcement.schema';
 import { nationalRows, toDrugView } from './drugAccess.service';
 import { announceMedicines } from './drugList.service';
+import { createFromSubmission } from './announcement.service';
+import { allowanceViewFor } from './announcementAllowance.service';
+import { preparePayload } from './companyAnnouncement.service';
 
 type Audited = Scope & { requestId?: string | null };
 
@@ -45,13 +49,14 @@ type Audited = Scope & { requestId?: string | null };
  *
  * Anything sent from outside the platform that would change what a doctor
  * sees waits here until a reviewer approves it: a company's products and
- * changes to them, claims on DRAP rows, and a clinic's proposals to the
- * national catalog. Nothing a doctor sees changes before that.
+ * changes to them, claims on DRAP rows, a clinic's proposals to the national
+ * catalog, and a company's announcements. Nothing a doctor sees changes
+ * before that, and an approved announcement is only a draft until
+ * RxDictate's console publishes it.
  *
  * Each type has one handler, below, that knows what may be sent and what
  * approving it does. The queue itself - who sees what, the history, the
- * statuses - knows nothing about medicines, so an announcement is a new type
- * and a new handler, not a new queue.
+ * statuses - knows nothing about medicines or announcements.
  */
 
 /* ------------------------------------------------------------------ *
@@ -129,6 +134,7 @@ const toView = (
   reviewerId: forReviewer && submission.reviewerId ? String(submission.reviewerId) : null,
   duplicateOfId: submission.duplicateOfId ? String(submission.duplicateOfId) : null,
   resultDrugId: submission.resultDrugId ? String(submission.resultDrugId) : null,
+  resultAnnouncementId: submission.resultAnnouncementId ? String(submission.resultAnnouncementId) : null,
   history: submission.history.map((entry) => ({
     step: entry.step,
     at: entry.at,
@@ -555,14 +561,35 @@ const approvePropose = async ({ scope, submission, sender, body }: Approval): Pr
   return into._id;
 };
 
+/** A draft in RxDictate's console, with the company as sponsor, linked both ways. Published there, not here. */
+const approveAnnouncement = async ({ scope, submission }: Approval): Promise<Approved> => {
+  const payload = SUBMISSION_PAYLOAD_SCHEMAS['announcement.create'].parse(submission.payload);
+  const announcement = await createFromSubmission(scope, submission, payload);
+  return { resultDrugId: null, resultAnnouncementId: announcement._id };
+};
+
 /* ------------------------------------------------------------------ *
  * The handlers
  * ------------------------------------------------------------------ */
 
+/** What approving made or changed: a national row, or an announcement's draft. */
+interface Approved {
+  resultDrugId: Types.ObjectId | null;
+  resultAnnouncementId: Types.ObjectId | null;
+}
+
+/** A medicine's approval, which answers the row it made or changed. */
+const drugResult =
+  (approveDrug: (approval: Approval) => Promise<Types.ObjectId>) =>
+  async (approval: Approval): Promise<Approved> => ({
+    resultDrugId: await approveDrug(approval),
+    resultAnnouncementId: null,
+  });
+
 interface Handler {
   /** Check a resubmission as if it were sent fresh, apart from this submission itself. */
   resubmit(submission: SubmissionDoc, payload: Record<string, unknown> | undefined): Promise<Prepared>;
-  approve(approval: Approval): Promise<Types.ObjectId>;
+  approve(approval: Approval): Promise<Approved>;
   /** The brand, strength, form and registration number a reviewer looks for duplicates of. */
   identity(
     submission: SubmissionDoc,
@@ -594,7 +621,7 @@ const HANDLERS: Record<SubmissionType, Handler> = {
         parsed(SUBMISSION_PAYLOAD_SCHEMAS['drug.create'], payload ?? submission.payload),
         submission._id,
       ),
-    approve: approveCreate,
+    approve: drugResult(approveCreate),
     identity: (submission) => {
       const fields = SUBMISSION_PAYLOAD_SCHEMAS['drug.create'].parse(submission.payload);
       return { registrationNo: fields.registrationNo, identityKey: identityKeyOf(fields) };
@@ -608,7 +635,7 @@ const HANDLERS: Record<SubmissionType, Handler> = {
         parsed(SUBMISSION_PAYLOAD_SCHEMAS['drug.update'], payload ?? submission.payload),
         submission._id,
       ),
-    approve: approveUpdate,
+    approve: drugResult(approveUpdate),
     identity: (submission, current) => {
       if (!current) return null;
       const changes = SUBMISSION_PAYLOAD_SCHEMAS['drug.update'].parse(submission.payload);
@@ -624,7 +651,7 @@ const HANDLERS: Record<SubmissionType, Handler> = {
   },
   'drug.discontinue': {
     resubmit: (submission) => prepareDiscontinue(submission.practiceId, submission.drugId!, submission._id),
-    approve: approveDiscontinue,
+    approve: drugResult(approveDiscontinue),
     identity: () => null,
   },
   'drug.claim': {
@@ -634,18 +661,29 @@ const HANDLERS: Record<SubmissionType, Handler> = {
         parsed(SUBMISSION_PAYLOAD_SCHEMAS['drug.claim'], payload ?? submission.payload),
         submission._id,
       ),
-    approve: approveClaim,
+    approve: drugResult(approveClaim),
     identity: (_submission, current) =>
       current ? { registrationNo: current.drapRegNo, identityKey: current.identityKey } : null,
   },
   'drug.propose': {
     // Sent again as the item now stands: the clinic corrects the item itself, not the proposal.
     resubmit: (submission) => preparePropose(submission.practiceId, submission.drugId!, submission._id),
-    approve: approvePropose,
+    approve: drugResult(approvePropose),
     identity: (submission) => {
       const fields = SUBMISSION_PAYLOAD_SCHEMAS['drug.propose'].parse(submission.payload);
       return { registrationNo: null, identityKey: identityKeyOf(fields) };
     },
+  },
+  'announcement.create': {
+    resubmit: (submission, payload) =>
+      preparePayload(
+        submission.practiceId,
+        parsed(SUBMISSION_PAYLOAD_SCHEMAS['announcement.create'], payload ?? submission.payload),
+        'body.payload',
+      ),
+    approve: approveAnnouncement,
+    // An announcement has no duplicates to look for.
+    identity: () => null,
   },
 };
 
@@ -699,6 +737,13 @@ export const submitDiscontinue = async (scope: Audited, drugId: string) =>
 
 export const submitClaim = async (scope: Audited, body: ClaimProductBody, uploadId: string | null = null) =>
   send(scope, 'drug.claim', await prepareClaim(scope.practiceId, body), uploadId);
+
+/**
+ * `POST /company/announcements`: the company's announcement and its wishes,
+ * for review. Accepted whatever its allowance; only publishing is limited.
+ */
+export const submitAnnouncement = async (scope: Audited, payload: CompanyAnnouncementPayload): Promise<SubmissionView> =>
+  viewOf(await send(scope, 'announcement.create', await preparePayload(scope.practiceId, payload, 'body')), false);
 
 /** `POST /drugs/:id/propose`: a clinic's own item, offered to the national catalog. */
 export const proposeDrug = async (scope: Audited, drugId: string): Promise<SubmissionView> =>
@@ -760,6 +805,7 @@ export const getSubmission = async (viewer: Viewer, id: string): Promise<Submiss
     submission: await viewOf(submission, reviewer),
     current: current ? toDrugView(current) : null,
     duplicates: reviewer ? (await duplicatesOf(submission, current)).map(toDrugView) : [],
+    allowance: submission.type === 'announcement.create' ? await allowanceViewFor(submission.practiceId) : null,
   };
 };
 
@@ -871,7 +917,7 @@ const decide = async (
   scope: Audited,
   step: Extract<SubmissionStep, 'approved' | 'rejected' | 'changesRequested'>,
   note: string | null,
-  extra: Partial<Pick<ISubmission, 'duplicateOfId' | 'resultDrugId'>> = {},
+  extra: Partial<Pick<ISubmission, 'duplicateOfId'>> = {},
 ): Promise<SubmissionDoc | null> =>
   Submission.findOneAndUpdate(
     { _id: submission._id, status: 'pending' },
@@ -897,6 +943,7 @@ const recordDecision = async (
       status: after.status,
       note: after.note,
       resultDrugId: after.resultDrugId ? String(after.resultDrugId) : null,
+      resultAnnouncementId: after.resultAnnouncementId ? String(after.resultAnnouncementId) : null,
       duplicateOfId: after.duplicateOfId ? String(after.duplicateOfId) : null,
     },
     requestId: scope.requestId ?? null,
@@ -923,9 +970,9 @@ export const approve = async (scope: Audited, id: string, body: ApproveSubmissio
     throw wrongStatus(submission, 'it was decided while you were looking at it');
   }
 
-  let resultDrugId: Types.ObjectId;
+  let approved: Approved;
   try {
-    resultDrugId = await HANDLERS[submission.type].approve({ scope, submission: claimed, sender, body });
+    approved = await HANDLERS[submission.type].approve({ scope, submission: claimed, sender, body });
   } catch (error) {
     await Submission.updateOne(
       { _id: submission._id },
@@ -937,7 +984,8 @@ export const approve = async (scope: Audited, id: string, body: ApproveSubmissio
     throw error;
   }
 
-  claimed.resultDrugId = resultDrugId;
+  claimed.resultDrugId = approved.resultDrugId;
+  claimed.resultAnnouncementId = approved.resultAnnouncementId;
   await claimed.save();
   return recordDecision(scope, submission, claimed, 'submission.approve');
 };
@@ -983,6 +1031,7 @@ export default {
   submitUpdate,
   submitDiscontinue,
   submitClaim,
+  submitAnnouncement,
   proposeDrug,
   listSubmissions,
   getSubmission,

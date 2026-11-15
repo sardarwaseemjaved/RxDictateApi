@@ -771,7 +771,11 @@ paths:
     patch:
       tags: [Companies]
       summary: Edit a company's details (platformAdmin)
-      description: Body updateCompanyBodySchema; only what is sent changes. Status changes only through suspend and reactivate.
+      description: |
+        Body updateCompanyBodySchema; only what is sent changes. Status changes only through suspend and reactivate.
+        announcementAllowance ({ postsPerMonth 1-1000 or null, peoplePerPost 1-1,000,000 or null }) is
+        replaced whole; null is no limit, which is where every company starts. The view's
+        announcementAllowance adds usedThisMonth and month (Asia/Karachi, YYYY-MM).
       security: [{ bearerAuth: [] }]
       responses:
         '200': { description: companyViewSchema }
@@ -820,6 +824,78 @@ paths:
       responses:
         '200': { description: companyViewSchema }
         '403': { description: 'FORBIDDEN, or ORGANISATION_SUSPENDED' }
+
+  /company/announcements:
+    get:
+      tags: [Company portal]
+      summary: Every announcement this company sponsors, newest first (announcement.submit)
+      description: |
+        Whoever wrote it: the drafts its approved submissions became, and those RxDictate wrote for it.
+        Each is companyAnnouncementViewSchema - kind, title, status, ended, dates, submissionId, product
+        and totals (announcementStatsViewSchema). Never the audience, the people it names, its priority,
+        or who was shown it.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of companyAnnouncementViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Company portal]
+      summary: Send an announcement for review (announcement.create submission)
+      description: |
+        Body companyAnnouncementPayloadSchema: kind, title, body, imageKey, link, cta, event, drugId,
+        showFrom, showUntil, and an audience of roles, specialties, provinces and cities only. The
+        console's field rules apply. Refused with VALIDATION_ERROR: sponsorId, placements, priority,
+        maxShows, or an audience naming organisationIds or userIds. A product's drugId must be one of
+        this company's own active medicines; imageKey must be one this company uploaded through POST
+        /announcements/images. Accepted whatever the company's allowance: only publishing is limited.
+        Approving makes a draft in RxDictate's console, which publishes it.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/PracticeId' }]
+      requestBody:
+        content:
+          application/json:
+            example:
+              { kind: update, title: Zentra now in packs of 30, body: The same tablet, in a larger pack., showFrom: '2026-12-01T00:00:00.000Z', showUntil: '2026-12-31T00:00:00.000Z', audience: { roles: [doctor], cities: [Lahore] } }
+      responses:
+        '201': { description: 'The pending submission (submissionViewSchema)' }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /company/announcements/{id}/registrations:
+    get:
+      tags: [Company portal]
+      summary: Who registered for one of its own seminars or events (announcement.submit)
+      description: As the console's list. Another company's, or RxDictate's own, is NOT_FOUND.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of announcementRegistrationViewSchema' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /company/announcements/{id}/registrations.csv:
+    get:
+      tags: [Company portal]
+      summary: The same list as a CSV file (announcement.submit)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The file, as an attachment
+          content:
+            text/csv: { schema: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /company/products:
     get:
@@ -1053,6 +1129,10 @@ paths:
         - drug.propose: decision is required. publish makes the clinic's row national with the same id.
           merge needs intoDrugId, an active national row: the clinic's and its doctors' list items and
           usage move there, and the clinic's row is discontinued, pointing at it. Prescriptions never change.
+        - announcement.create: a draft announcement with the company as sponsor, its audience as asked
+          (no clinics or people), placements [inbox.updates], priority 0, no cap; resultAnnouncementId
+          names it and its submissionId names this. Nothing is published. A product no longer active
+          or no longer the company's is VALIDATION_ERROR on payload.drugId.
 
         If carrying it out fails, it stays pending.
       security: [{ bearerAuth: [] }]
@@ -1064,7 +1144,7 @@ paths:
           application/json:
             example: { decision: merge, intoDrugId: 6540000000000000000000aa }
       responses:
-        '200': { description: submissionViewSchema, with resultDrugId }
+        '200': { description: 'submissionViewSchema, with resultDrugId or resultAnnouncementId' }
         '400': { description: VALIDATION_ERROR }
         '403': { description: 'FORBIDDEN, or ORGANISATION_SUSPENDED' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1420,13 +1500,21 @@ paths:
       description: |
         Filter by status (draft, published, withdrawn), kind (seminar, event, update, product) and
         sponsorId (a company's id, or none for RxDictate's own). Each is announcementViewSchema;
-        ended is true for a published one whose window has passed.
+        ended is true for a published one whose window has passed, people names audience.userIds, and
+        submissionId is the company submission it came from.
+
+        userId (announcement.people.read, platformAdmin only; FORBIDDEN otherwise, and audited): one
+        person's list - what they are in the audience of now (published, inside its window, matching
+        them through any clinic they are active in) plus anything they have a state on or registered
+        for - each with forPerson { inAudience, shows, clicks, dismissed, reminded, registered,
+        firstShownAt, lastShownAt }. Without userId, forPerson is null.
       security: [{ bearerAuth: [] }]
       parameters:
         - { $ref: '#/components/parameters/PracticeId' }
         - { in: query, name: status, schema: { type: string, enum: [draft, published, withdrawn] } }
         - { in: query, name: kind, schema: { type: string, enum: [seminar, event, update, product] } }
         - { in: query, name: sponsorId, schema: { type: string } }
+        - { in: query, name: userId, schema: { type: string } }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
@@ -1470,13 +1558,57 @@ paths:
         '400': { description: VALIDATION_ERROR }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /announcements/people:
+    get:
+      tags: [Announcements]
+      summary: Clinic members to choose by name (announcement.create)
+      description: |
+        Query announcementPeopleQuerySchema. q (2-120) matches a name anywhere, ignoring case, or a phone
+        from its start, typed local (0300...) or E.164. role narrows to people holding it in a clinic.
+        Only people active in an active clinic in a clinic role - never a patient, a company's member
+        or the platform's. A whole matching number first, then by name. Each is
+        announcementPersonViewSchema.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, required: true, schema: { type: string, minLength: 2, maxLength: 120 } }
+        - { in: query, name: role, schema: { type: string, enum: [doctor, pa, medicineManager] } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200': { description: 'An array of announcementPersonViewSchema in data' }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /announcements/reach:
+    get:
+      tags: [Announcements]
+      summary: Who was shown a sponsor's announcements, or one announcement (platformAdmin)
+      description: |
+        Needs announcement.read and announcement.people.read; audited. Exactly one of sponsorId (a
+        company, or none) and announcementId. One announcementReachRowSchema per person shown at least
+        one: { person, announcements, shows, clicks, dismissed, lastShownAt }, most shows first.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: sponsorId, schema: { type: string } }
+        - { in: query, name: announcementId, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 'A list of announcementReachRowSchema' }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /announcements/images:
     post:
       tags: [Announcements]
-      summary: Somewhere to PUT an announcement's image (platform admin, content manager)
+      summary: Somewhere to PUT an announcement's image (announcement.create or announcement.submit)
       description: |
         Body createAnnouncementImageBodySchema: image/jpeg or image/png, at most 2 MB. Answers an upload
-        ticket as POST /reports/uploads does; PUT the bytes, then send fileKey as imageKey.
+        ticket as POST /reports/uploads does; PUT the bytes, then send fileKey as imageKey. The key is
+        filed under the organisation that asked: a company may use only its own, and the console
+        accepts its own or the sponsor's.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/PracticeId' }]
       responses:
@@ -1488,11 +1620,11 @@ paths:
   /announcements/audience-count:
     post:
       tags: [Announcements]
-      summary: How many people an audience reaches now (platform admin, content manager)
+      summary: How many people an audience reaches now (announcement.read or announcement.submit)
       description: |
         Body audienceCountBodySchema: { audience }, typically the one being edited. Active members of
         clinics in a clinic role who match, a person in two clinics counting once. The same rule the
-        slots use.
+        slots use. A company counts by rule only: organisationIds or userIds is VALIDATION_ERROR.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/PracticeId' }]
       responses:
@@ -1559,6 +1691,11 @@ paths:
         Only a draft (ANNOUNCEMENT_WRONG_STATUS otherwise, with details.status). One whose window has
         already passed is ANNOUNCEMENT_ENDED. Its medicine and sponsor are checked again, including
         drug.companyId equalling sponsorId for a product (VALIDATION_ERROR naming body.drugId otherwise).
+        A sponsored one must fit the sponsor's allowance: ANNOUNCEMENT_REACH_OVER_ALLOWANCE (details
+        reach, allowed) when its audience reaches more than peoplePerPost, ANNOUNCEMENT_ALLOWANCE_USED
+        (details used, allowed, month) when the month's posts are used. Two publishes at once cannot
+        both take the last post. PATCH on a published one checks reach when audience changes, and both
+        when sponsorId does.
       security: [{ bearerAuth: [] }]
       parameters:
         - { $ref: '#/components/parameters/PracticeId' }
@@ -1568,7 +1705,7 @@ paths:
         '400': { description: VALIDATION_ERROR }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: ANNOUNCEMENT_WRONG_STATUS or ANNOUNCEMENT_ENDED }
+        '409': { description: 'ANNOUNCEMENT_WRONG_STATUS, ANNOUNCEMENT_ENDED, ANNOUNCEMENT_ALLOWANCE_USED or ANNOUNCEMENT_REACH_OVER_ALLOWANCE' }
 
   /announcements/{id}/withdraw:
     post:

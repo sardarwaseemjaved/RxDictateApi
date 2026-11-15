@@ -11,13 +11,24 @@ import { objectIdSchema } from './common';
  * - `drug.discontinue`: a company's product, to be marked discontinued.
  * - `drug.claim`: a company claims a DRAP-imported product by its registration number.
  * - `drug.propose`: a clinic's own item, offered to the national catalog.
+ * - `announcement.create`: a company's announcement, with the dates and
+ *   audience it would like. Approving makes a draft in RxDictate's console,
+ *   which RxDictate then publishes; it never goes live from the queue.
  */
-export const submissionTypeSchema = z.enum(['drug.create', 'drug.update', 'drug.discontinue', 'drug.claim', 'drug.propose']);
+export const submissionTypeSchema = z.enum([
+  'drug.create',
+  'drug.update',
+  'drug.discontinue',
+  'drug.claim',
+  'drug.propose',
+  'announcement.create',
+]);
 export type SubmissionType = z.infer<typeof submissionTypeSchema>;
 
 /**
  * - `pending`: waiting for a reviewer.
- * - `approved`: done; what it asked for is live.
+ * - `approved`: done; what it asked for is live, or for an announcement, a
+ *   draft RxDictate publishes.
  * - `rejected`: refused, with a note. Final.
  * - `changesRequested`: the sender may edit it and send it again, as the same
  *   submission with its history kept.

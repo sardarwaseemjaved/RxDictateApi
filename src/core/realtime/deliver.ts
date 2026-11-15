@@ -21,6 +21,9 @@ export const CLOSE_POLICY = 1008;
  *
  * `all` is every open socket, for what applies to everyone, like a
  * platform-wide setting.
+ *
+ * `holders` is every open socket whose member holds an action, wherever they
+ * are: every clinic app, for what changes every clinic's announcement slots.
  */
 export type Audience =
   | { to: 'location'; locationId: string }
@@ -28,7 +31,8 @@ export type Audience =
   | { to: 'session'; sessionId: string }
   | { to: 'practice'; practiceId: string }
   | { to: 'patient'; practiceId: string; linkedTo: string[] }
-  | { to: 'all' };
+  | { to: 'all' }
+  | { to: 'holders'; action: Action };
 
 /**
  * Everything a write can do to open connections.
@@ -90,8 +94,9 @@ const TOPIC_READ: Record<RealtimeTopic, Action | readonly Action[] | null> = {
   medicines: null,
   // A reviewer, a company's staff, or a clinic's doctors and medicine manager.
   submissions: ['submission.review', 'drug.submit', 'drug.propose'],
-  // Clinic members only; sent to every open socket and filtered here.
-  announcements: 'announcement.view',
+  // Clinic members, and a company's senders about their own company's: the
+  // listener sends a company only what it sponsors.
+  announcements: ['announcement.view', 'announcement.submit'],
 };
 
 const mayHear = (connection: Connection, message: RealtimeServerMessage): boolean => {
@@ -118,6 +123,8 @@ const audienceOf = (audience: Audience): Connection[] => {
     }
     case 'all':
       return everyConnection();
+    case 'holders':
+      return everyConnection().filter((connection) => can(connection.role, audience.action));
     default:
       return [];
   }

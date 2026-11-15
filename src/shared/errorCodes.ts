@@ -51,6 +51,8 @@ export const ERROR_CODES = [
   'ANNOUNCEMENT_WITHDRAWN',
   'ANNOUNCEMENT_ENDED',
   'ANNOUNCEMENT_NOT_AN_EVENT',
+  'ANNOUNCEMENT_ALLOWANCE_USED',
+  'ANNOUNCEMENT_REACH_OVER_ALLOWANCE',
 
   // Prescriptions
   'RX_LOCKED',
@@ -134,6 +136,16 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   ANNOUNCEMENT_ENDED: 409,
   /** A reminder or a registration on something that is not a seminar or an event. */
   ANNOUNCEMENT_NOT_AN_EVENT: 409,
+  /**
+   * The sponsor has published all the posts its allowance gives it this month
+   * (Asia/Karachi). `details: { used, allowed, month }`, month as `YYYY-MM`.
+   */
+  ANNOUNCEMENT_ALLOWANCE_USED: 409,
+  /**
+   * The audience reaches more people than the sponsor's allowance lets one
+   * post reach. `details: { reach, allowed }`; narrow the audience.
+   */
+  ANNOUNCEMENT_REACH_OVER_ALLOWANCE: 409,
 
   RX_LOCKED: 409,
   RX_NOT_DRAFT: 409,

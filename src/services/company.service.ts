@@ -7,6 +7,7 @@ import type { Scope } from '../core/db';
 import type { PageMeta } from '../shared/response';
 import type { CompanyView, CreateCompanyBody, ListCompaniesQuery, UpdateCompanyBody } from '../shared/company.schema';
 import { grantMembership } from './team.service';
+import { allowanceViewOf } from './announcementAllowance.service';
 
 type Audited = Scope & { requestId?: string | null };
 
@@ -19,7 +20,8 @@ type Audited = Scope & { requestId?: string | null };
  * only the platform makes one. Its admin then adds its own staff.
  */
 
-export const toCompanyView = (company: PracticeDoc): CompanyView => ({
+/** A company as it is, with its announcement allowance and this month's use. */
+export const toCompanyView = async (company: PracticeDoc): Promise<CompanyView> => ({
   id: String(company._id),
   name: company.name,
   address: company.address ?? '',
@@ -30,6 +32,7 @@ export const toCompanyView = (company: PracticeDoc): CompanyView => ({
   contactPhone: company.contactPhone ?? null,
   status: company.status ?? 'active',
   suspendedAt: company.suspendedAt ?? null,
+  announcementAllowance: await allowanceViewOf(company),
   createdAt: company.createdAt,
 });
 
@@ -59,7 +62,7 @@ export const listCompanies = async (query: ListCompaniesQuery): Promise<{ compan
     { page: query.page, limit: query.limit, sortBy: 'name:asc,_id:asc' },
   );
   return {
-    companies: result.results.map(toCompanyView),
+    companies: await Promise.all(result.results.map(toCompanyView)),
     meta: { page: result.page, limit: result.limit, total: result.totalResults, totalPages: result.totalPages },
   };
 };
@@ -99,7 +102,7 @@ export const createCompany = async (scope: Audited, body: CreateCompanyBody): Pr
     throw error;
   }
 
-  const view = toCompanyView(company);
+  const view = await toCompanyView(company);
   await writeAudit(scope, {
     action: 'company.create',
     entity: 'practice',
@@ -121,7 +124,10 @@ export const createCompany = async (scope: Audited, body: CreateCompanyBody): Pr
   return view;
 };
 
-/** `PATCH /companies/:id`. A changed SECP number must still be the only one. */
+/**
+ * `PATCH /companies/:id`. A changed SECP number must still be the only one.
+ * The announcement allowance is replaced whole, and audited with the rest.
+ */
 export const updateCompany = async (scope: Audited, id: string, patch: UpdateCompanyBody): Promise<CompanyView> => {
   const company = await findCompany(id);
   if (patch.secpRegNo && patch.secpRegNo !== company.secpRegNo) {
@@ -130,7 +136,7 @@ export const updateCompany = async (scope: Audited, id: string, patch: UpdateCom
     }
   }
 
-  const before = toCompanyView(company);
+  const before = await toCompanyView(company);
   company.set({ ...patch });
   if (!company.isModified()) {
     return before;
@@ -144,7 +150,7 @@ export const updateCompany = async (scope: Audited, id: string, patch: UpdateCom
     throw error;
   }
 
-  const after = toCompanyView(company);
+  const after = await toCompanyView(company);
   await writeAudit(scope, {
     action: 'company.update',
     entity: 'practice',
@@ -169,12 +175,12 @@ const setStatus = async (scope: Audited, id: string, suspended: boolean): Promis
     return toCompanyView(company);
   }
 
-  const before = toCompanyView(company);
+  const before = await toCompanyView(company);
   company.status = suspended ? 'suspended' : 'active';
   company.suspendedAt = suspended ? new Date() : null;
   await company.save();
 
-  const after = toCompanyView(company);
+  const after = await toCompanyView(company);
   await writeAudit(scope, {
     action: suspended ? 'company.suspend' : 'company.reactivate',
     entity: 'practice',

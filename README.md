@@ -908,11 +908,12 @@ console is [announcement.service.ts](src/services/announcement.service.ts) and
 what a member sees is
 [announcementSlot.service.ts](src/services/announcementSlot.service.ts).
 
-**Who writes them.** Only RxDictate's own team in this phase - a
-`platformAdmin` or a `contentManager` - including sponsored ones set up on a
-company's behalf. RxDictate is its own reviewer, so nothing goes through the
-review queue, and a published one may still be edited. Every step is kept in
-its `history` and the audit log.
+**Who writes them.** RxDictate's own team - a `platformAdmin` or a
+`contentManager` - including sponsored ones set up on a company's behalf. A
+company sends its own through the review queue (below); approving it makes a
+draft here. Only the console publishes, so RxDictate is its own reviewer, and a
+published one may still be edited. Every step is kept in its `history` and the
+audit log.
 
 **What one has.**
 
@@ -949,8 +950,10 @@ where `company` is `{ id, name }` or null for an unclaimed row, and
 
 **The image.** As a report page is uploaded: `POST /announcements/images` with
 `{ contentType, size }` (JPEG or PNG, at most 2 MB) answers an upload ticket,
-the console PUTs the bytes, and hands the key back as `imageKey`. Only a key
-issued that way is accepted. Views carry a signed `image: { url, expiresAt }`.
+the console or a company PUTs the bytes, and hands the key back as `imageKey`.
+The key is filed under the organisation that asked for it: a company may use
+only its own, and the console accepts its own or the sponsor's. Views carry a
+signed `image: { url, expiresAt }`.
 
 **Audience.** Lists of `roles` (`doctor`, `pa`, `medicineManager`),
 `specialties`, `provinces`, `cities`, `organisationIds` (clinics) and `userIds`.
@@ -960,7 +963,19 @@ place matches the location the app is open at (`X-Location-Id`), or with none,
 any location the member works at. `POST /announcements/audience-count` with
 `{ audience }` says how many people that reaches now, a person in two clinics
 counting once; the slots and the count use the same rule
-(`matchesAudience`).
+(`matchesAudience`). A company may count too, by rule only: `organisationIds`
+or `userIds` from a company is `VALIDATION_ERROR`.
+
+**Choosing people by name.** `GET /announcements/people?q=&role=&limit=`
+(`announcement.create`) finds clinic members by name, anywhere in it and
+ignoring case, or by phone from its start, typed local (`0300…`) or E.164
+(`src/utils/phone.ts`). Only people active in a clinic that exists, in a clinic
+role: never a patient, a company's member or the platform's. A whole matching
+number comes first, then by name. Each is `announcementPersonViewSchema`:
+`{ id, name, phone, roles, specialties, clinics, cities }`, across their
+clinics now. An announcement's view carries `people`, the people
+`audience.userIds` names, in order; someone who left every clinic is still
+there with empty `roles` and `clinics`, someone deleted is not.
 
 **Placements.** `today.banner`, `sidebar.card` and `inbox.updates`
 (`announcementPlacementSchema`). `ANNOUNCEMENT_PLACEMENT_LIMITS` says how many
@@ -978,8 +993,10 @@ Each carries this member's `reminded` and `registered`.
 **What the app reports.** `POST /announcements/:id/events` with
 `{ type: 'shown' | 'clicked' | 'dismissed' }`. The app sends `shown` when it
 actually draws one, and `maxShows` (null: until dismissed) counts those. A
-dismissed one never comes back to that person. Who saw what stays in
-`announcementStates` on the server; the console sees totals only.
+dismissed one never comes back to that person. Each person's shows and clicks,
+and when they were first and last shown it, are kept in `announcementStates`.
+Clicks have been kept per person only since phase 6; older ones are on the
+announcement's total alone.
 
 **Remind me.** `POST /announcements/:id/reminder` on a seminar or an event
 schedules bell notifications (`announcement.reminder`) a day before and an
@@ -1007,6 +1024,54 @@ One that isn't published, or isn't meant for the caller, is `NOT_FOUND`.
 individual doctors' data; registrations, given with consent, are the only
 exception.
 
+**Who saw what.** Only RxDictate's admin (`announcement.people.read`, not a
+content manager and never a company), and every read writes an
+`announcement.people.read` audit entry with its query.
+
+- `GET /announcements?userId=` lists what that person is in the audience of
+  now (published, inside its window, matching them through any clinic they are
+  active in) plus anything they have a state on or registered for. Each row
+  gains `forPerson: { inAudience, shows, clicks, dismissed, reminded,
+registered, firstShownAt, lastShownAt }`; without `userId` it is null. It
+  combines with `status`, `kind` and `sponsorId`. Worked out in memory, which
+  is fine while announcements number in the hundreds.
+- `GET /announcements/reach?sponsorId=` (a company, or `none`) or
+  `?announcementId=`, paged: one row per person shown at least one,
+  `{ person, announcements, shows, clicks, dismissed, lastShownAt }`, most
+  shows first.
+
+**A company's own.** A `companyAdmin` or `companyEditor`
+(`announcement.submit`) sends one with `POST /company/announcements`: what it
+says (the console's fields and rules) and the dates and audience it would like,
+by rule only. `sponsorId`, `placements`, `priority`, `maxShows`, and clinics or
+people in the audience are `VALIDATION_ERROR`. A product must be one of its own
+active medicines. It becomes an `announcement.create` submission; reject, ask
+for changes, send again and withdraw work as for products. Approving makes a
+draft with the company as sponsor, its audience as asked, `inbox.updates`,
+priority 0 and no cap, linked both ways (`resultAnnouncementId`,
+`submissionId`); the product is checked again first. RxDictate adjusts and
+publishes it in the console. The company reads every announcement it sponsors,
+whoever wrote it, with totals only, at `GET /company/announcements`, and who
+registered for its own seminars and events at
+`GET /company/announcements/:id/registrations` and `.csv`.
+
+**A company's allowance.** `announcementAllowance: { postsPerMonth,
+peoplePerPost }` on the company, set with `PATCH /companies/:id`; null is no
+limit, and every company starts with none. What counts is an announcement with
+the company as sponsor, in the Asia/Karachi month it was first published,
+whoever wrote it: a draft doesn't, one withdrawn after publishing still does.
+Publishing a sponsored one past the month's posts is
+`ANNOUNCEMENT_ALLOWANCE_USED` (`details: { used, allowed, month }`); an
+audience reaching more than `peoplePerPost` is
+`ANNOUNCEMENT_REACH_OVER_ALLOWANCE` (`details: { reach, allowed }`). Editing a
+published one checks its reach when the audience changes, and both when the
+sponsor does. Each publish first takes a post from a counter per company and
+month (`counters`, key `announcementPosts:YYYY-MM`) with a conditional `$inc`,
+so two at once cannot both have the last one; a publish that fails gives it
+back. A company's submission is accepted whatever its allowance. The company's
+views, and the detail of an `announcement.create` submission, carry the
+allowance with `usedThisMonth` and `month`.
+
 **Never.** No announcement appears in the consult or the prescription
 workspace, on the printout or its PDF, on anything a patient sees, on the
 verification page, or in medicine search and suggestions. Only the
@@ -1014,7 +1079,10 @@ verification page, or in medicine search and suggestions. Only the
 
 **Live.** Publishing, editing a published one and withdrawing send
 `announcements` to every open clinic app, which refetches its slots. So does a
-change to `announcements.sponsored`.
+change to `announcements.sponsored`. A sponsor company's own apps hear
+`announcements` for any change to one it sponsors - the draft an approval
+makes, a draft's edits, publishing and withdrawing - and never about another
+company's.
 
 ## The patient's area
 
@@ -1616,37 +1684,38 @@ No local mongod, no CI service container.
 
 The suites that exist to hold the six rules down:
 
-| File                                                                                       | What it proves                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                     | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                                                                                                                                                                      |
-| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)           | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                                                                                                                                                                         |
-| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                         | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                                                                                                                                                                     |
-| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                       | every route in the table responds, with real data or 501                                                                                                                                                                                                                                                                                                                             |
-| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts) | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                                                                                                                                                                   |
-| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                 | the permissions table, read straight across                                                                                                                                                                                                                                                                                                                                          |
-| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                 | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                                                                                                                                                                       |
-| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)               | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                                                                                                                                                                    |
-| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)   | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill                                                                                                                                             |
-| [tests/integration/files.test.ts](tests/integration/files.test.ts)                         | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                                                                                                                                                                 |
-| [tests/integration/history.test.ts](tests/integration/history.test.ts)                     | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                                                                                                                                                                           |
-| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                 | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                                                                                                                                                                  |
-| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)   | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                                                                                                                                                                  |
-| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)               | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                                                                                                                                                              |
-| [tests/integration/realtime.test.ts](tests/integration/realtime.test.ts)                   | the realtime socket: every sign-in failure gives the HTTP code and closes; a fresh token keeps it open; who hears which topic; every row of the topics table sends exactly one message; lost access closes the right sockets; no message carries a name, phone or medical field                                                                                                      |
-| [tests/integration/realtimeTimers.test.ts](tests/integration/realtimeTimers.test.ts)       | under fake timers: an unsigned socket is closed after 10 s, the heartbeat goes out every 25 s, and a socket that stops answering pings is terminated                                                                                                                                                                                                                                 |
-| [tests/integration/verify.test.ts](tests/integration/verify.test.ts)                       | a printout's QR: approval makes a unique code, the backfill fills old ones, the public page answers `valid` or `replaced` with no name, phone, MR number or clinical section, every kind of miss is the same `NOT_FOUND`, the SVG decodes to the link, and the log keeps only the start of a code                                                                                    |
-| [tests/integration/generalRateLimit.test.ts](tests/integration/generalRateLimit.test.ts)   | the general limit counts each signed-in person on their own, so two people behind one address don't share it; anonymous requests and tokens this API didn't sign count by address                                                                                                                                                                                                    |
-| [tests/integration/verifyRateLimit.test.ts](tests/integration/verifyRateLimit.test.ts)     | the verify routes share their own bucket of 30 a minute, and the 31st answers `RATE_LIMITED`                                                                                                                                                                                                                                                                                         |
-| [tests/integration/organisations.test.ts](tests/integration/organisations.test.ts)         | old practices read as clinics after the backfill; `platform:init` makes one platform and one admin and a second run changes nothing; a platform member is `FORBIDDEN` from the clinic routes; a role that doesn't fit its organisation is refused; `can` on `/me`; specialties, province and city round-trip                                                                         |
-| [tests/integration/settings.test.ts](tests/integration/settings.test.ts)                   | the default when nothing is set; a person's value beats the clinic's unless the clinic locked it; a platform lock beats both; every kind of refusal is `VALIDATION_ERROR`; an assistant can't set the clinic's; changes are audited; `settings` reaches the person, the clinic or everyone                                                                                           |
-| [tests/integration/drugCatalog.test.ts](tests/integration/drugCatalog.test.ts)             | the import inserts, updates, discontinues and does nothing on a dry run; the type-ahead uses its index; the migration makes one row per doctor, drops what nobody used, matches usage and changes nothing the second time                                                                                                                                                            |
-| [tests/integration/medicines.test.ts](tests/integration/medicines.test.ts)                 | each mode's results and order; another clinic's items and another doctor's rows never appear; lists; a save creates nothing and approval makes one row; the medicine manager's reach; `medicines` reaches the right sockets                                                                                                                                                          |
-| [tests/integration/portal.test.ts](tests/integration/portal.test.ts)                       | linking needs the phone and a code, and every refusal is one answer; another user's link is `NOT_FOUND` everywhere and a linked patient is refused on every clinic route; a view carries no draft, edit log or internal field; every way a link ends; invites: hashed, once a day, automatic once only, and a failed SMS fails nothing; uploads and page keys; the clinic's controls |
-| [tests/integration/portalRateLimit.test.ts](tests/integration/portalRateLimit.test.ts)     | the routes that try a code share a bucket per person, and going over it answers `RATE_LIMITED`                                                                                                                                                                                                                                                                                       |
-| [tests/integration/syncCollections.test.ts](tests/integration/syncCollections.test.ts)     | on an older database, the non-unique `vitals` index becomes the unique one, or stays with a warning if two readings share a visit                                                                                                                                                                                                                                                    |
-| [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                       | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited                                                                                                                                             |
-| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                 | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                                                                                                                                                                           |
-| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)           | the normal ranges the app and the server both read                                                                                                                                                                                                                                                                                                                                   |
-| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                       | every dose pattern, timing and form, in English and Urdu                                                                                                                                                                                                                                                                                                                             |
+| File                                                                                             | What it proves                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [tests/integration/tenancy.test.ts](tests/integration/tenancy.test.ts)                           | practice A cannot read or write practice B's patients; a PA is held to their own locations; removing them ends their access now                                                                                                                                                                                                                                                      |
+| [tests/integration/prescription.test.ts](tests/integration/prescription.test.ts)                 | an approved prescription cannot be mutated; a revise makes v2 and supersedes v1; the letterhead stays frozen; concurrent approvals never collide on a number                                                                                                                                                                                                                         |
+| [tests/integration/voice.test.ts](tests/integration/voice.test.ts)                               | ops are validated by the server before they are applied; segments apply in order; audio retention deletes the recording and keeps the transcript                                                                                                                                                                                                                                     |
+| [tests/integration/routes.test.ts](tests/integration/routes.test.ts)                             | every route in the table responds, with real data or 501                                                                                                                                                                                                                                                                                                                             |
+| [tests/unit/services/prescriptionOps.test.ts](tests/unit/services/prescriptionOps.test.ts)       | the ops engine, including that one bad op discards the whole batch                                                                                                                                                                                                                                                                                                                   |
+| [tests/unit/core/permissions.test.ts](tests/unit/core/permissions.test.ts)                       | the permissions table, read straight across                                                                                                                                                                                                                                                                                                                                          |
+| [tests/integration/assistant.test.ts](tests/integration/assistant.test.ts)                       | the PA's day: queue tokens that never repeat or get reused, MR numbers, allergies, vitals, reports, the schedule and the inbox                                                                                                                                                                                                                                                       |
+| [tests/integration/queueOrder.test.ts](tests/integration/queueOrder.test.ts)                     | the assistant's order of the list: a new visit goes last, a move goes before another or to the end and keeps its token, only waiting visits move, two moves at once both land, and the backfill keeps token order                                                                                                                                                                    |
+| [tests/integration/patientLocations.test.ts](tests/integration/patientLocations.test.ts)         | an assistant sees the patients of their own locations: search, list, counts and every by-id route, `NOT_FOUND` for the rest; links from registering, visits and appointments; the whole-phone match; a location taken away; the backfill                                                                                                                                             |
+| [tests/integration/files.test.ts](tests/integration/files.test.ts)                               | signed downloads and uploads: a good link serves or takes the file, a tampered or expired one is refused, an upload of the wrong type or size is refused, and a browser on an allowed origin may PUT                                                                                                                                                                                 |
+| [tests/integration/history.test.ts](tests/integration/history.test.ts)                           | a patient's timeline: every kind in one order, paged without repeats, practice-wide, a revision's labs, the doctor's alone                                                                                                                                                                                                                                                           |
+| [tests/integration/templates.test.ts](tests/integration/templates.test.ts)                       | templates keep the regimen and drop the patient, belong to one doctor, and add to an open draft without removing or doubling a line                                                                                                                                                                                                                                                  |
+| [tests/integration/prescriptionList.test.ts](tests/integration/prescriptionList.test.ts)         | the prescriptions list: who each is for, Karachi day ranges, search by name, phone or MR number, and location scope                                                                                                                                                                                                                                                                  |
+| [tests/integration/soloDoctor.test.ts](tests/integration/soloDoctor.test.ts)                     | a doctor with no assistant: the visit follows the prescription, and the patients list sorts and filters                                                                                                                                                                                                                                                                              |
+| [tests/integration/realtime.test.ts](tests/integration/realtime.test.ts)                         | the realtime socket: every sign-in failure gives the HTTP code and closes; a fresh token keeps it open; who hears which topic; every row of the topics table sends exactly one message; lost access closes the right sockets; no message carries a name, phone or medical field                                                                                                      |
+| [tests/integration/realtimeTimers.test.ts](tests/integration/realtimeTimers.test.ts)             | under fake timers: an unsigned socket is closed after 10 s, the heartbeat goes out every 25 s, and a socket that stops answering pings is terminated                                                                                                                                                                                                                                 |
+| [tests/integration/verify.test.ts](tests/integration/verify.test.ts)                             | a printout's QR: approval makes a unique code, the backfill fills old ones, the public page answers `valid` or `replaced` with no name, phone, MR number or clinical section, every kind of miss is the same `NOT_FOUND`, the SVG decodes to the link, and the log keeps only the start of a code                                                                                    |
+| [tests/integration/companyAnnouncements.test.ts](tests/integration/companyAnnouncements.test.ts) | choosing people by name; a company's announcement through review to a draft; allowances, including two publishes at once; who saw what, for RxDictate's admin only; the company's own list and registrations; live updates to the sponsor alone                                                                                                                                      |
+| [tests/integration/generalRateLimit.test.ts](tests/integration/generalRateLimit.test.ts)         | the general limit counts each signed-in person on their own, so two people behind one address don't share it; anonymous requests and tokens this API didn't sign count by address                                                                                                                                                                                                    |
+| [tests/integration/verifyRateLimit.test.ts](tests/integration/verifyRateLimit.test.ts)           | the verify routes share their own bucket of 30 a minute, and the 31st answers `RATE_LIMITED`                                                                                                                                                                                                                                                                                         |
+| [tests/integration/organisations.test.ts](tests/integration/organisations.test.ts)               | old practices read as clinics after the backfill; `platform:init` makes one platform and one admin and a second run changes nothing; a platform member is `FORBIDDEN` from the clinic routes; a role that doesn't fit its organisation is refused; `can` on `/me`; specialties, province and city round-trip                                                                         |
+| [tests/integration/settings.test.ts](tests/integration/settings.test.ts)                         | the default when nothing is set; a person's value beats the clinic's unless the clinic locked it; a platform lock beats both; every kind of refusal is `VALIDATION_ERROR`; an assistant can't set the clinic's; changes are audited; `settings` reaches the person, the clinic or everyone                                                                                           |
+| [tests/integration/drugCatalog.test.ts](tests/integration/drugCatalog.test.ts)                   | the import inserts, updates, discontinues and does nothing on a dry run; the type-ahead uses its index; the migration makes one row per doctor, drops what nobody used, matches usage and changes nothing the second time                                                                                                                                                            |
+| [tests/integration/medicines.test.ts](tests/integration/medicines.test.ts)                       | each mode's results and order; another clinic's items and another doctor's rows never appear; lists; a save creates nothing and approval makes one row; the medicine manager's reach; `medicines` reaches the right sockets                                                                                                                                                          |
+| [tests/integration/portal.test.ts](tests/integration/portal.test.ts)                             | linking needs the phone and a code, and every refusal is one answer; another user's link is `NOT_FOUND` everywhere and a linked patient is refused on every clinic route; a view carries no draft, edit log or internal field; every way a link ends; invites: hashed, once a day, automatic once only, and a failed SMS fails nothing; uploads and page keys; the clinic's controls |
+| [tests/integration/portalRateLimit.test.ts](tests/integration/portalRateLimit.test.ts)           | the routes that try a code share a bucket per person, and going over it answers `RATE_LIMITED`                                                                                                                                                                                                                                                                                       |
+| [tests/integration/syncCollections.test.ts](tests/integration/syncCollections.test.ts)           | on an older database, the non-unique `vitals` index becomes the unique one, or stays with a warning if two readings share a visit                                                                                                                                                                                                                                                    |
+| [tests/integration/logout.test.ts](tests/integration/logout.test.ts)                             | signing out: the session goes, an unexpired token is then refused, it is idempotent, works with a lapsed token, one device does not affect another, a rotated token coming back ends the session, and no token is ever stored or audited                                                                                                                                             |
+| [tests/integration/dictation.test.ts](tests/integration/dictation.test.ts)                       | real dictation against a stubbed OpenAI: a clean mix of Urdu and English, an update to an existing line, speech to the patient, an invented item id, a timeout and a retry                                                                                                                                                                                                           |
+| [tests/unit/services/vitalFlags.test.ts](tests/unit/services/vitalFlags.test.ts)                 | the normal ranges the app and the server both read                                                                                                                                                                                                                                                                                                                                   |
+| [tests/unit/services/dose.test.ts](tests/unit/services/dose.test.ts)                             | every dose pattern, timing and form, in English and Urdu                                                                                                                                                                                                                                                                                                                             |
 
 # RxDictateApi

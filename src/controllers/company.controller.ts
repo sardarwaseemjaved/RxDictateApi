@@ -2,6 +2,7 @@ import { auditScope } from '../core/audit';
 import { scopeFrom } from '../core/tenancy';
 import * as companyService from '../services/company.service';
 import * as companyProductService from '../services/companyProduct.service';
+import * as companyAnnouncementService from '../services/companyAnnouncement.service';
 import * as submissionService from '../services/submission.service';
 import catchAsync from '../utils/catchAsync';
 import { parsedBody, parsedQuery } from '../utils/request';
@@ -16,6 +17,11 @@ import type {
   UpdateCompanyBody,
   UpdateProductBody,
 } from '../shared/company.schema';
+import type {
+  CreateCompanyAnnouncementBody,
+  ListAnnouncementRegistrationsQuery,
+  ListCompanyAnnouncementsQuery,
+} from '../shared/announcement.schema';
 
 /* RxDictate's view of companies. */
 
@@ -92,4 +98,40 @@ export const checkCsv = catchAsync(async (req, res) => {
 
 export const sendCsv = catchAsync(async (req, res) => {
   sendCreated(res, await companyProductService.sendCsv(auditScope(req), parsedBody<CompanyCsvBody>(req).csv));
+});
+
+/* A company's announcements. */
+
+/** Answers the pending submission, as GET /submissions lists it. */
+export const submitAnnouncement = catchAsync(async (req, res) => {
+  sendCreated(
+    res,
+    await submissionService.submitAnnouncement(auditScope(req), parsedBody<CreateCompanyAnnouncementBody>(req)),
+  );
+});
+
+export const listAnnouncements = catchAsync(async (req, res) => {
+  const { announcements, meta } = await companyAnnouncementService.listOwn(
+    scopeFrom(req),
+    parsedQuery<ListCompanyAnnouncementsQuery>(req),
+  );
+  sendData(res, announcements, meta);
+});
+
+export const listAnnouncementRegistrations = catchAsync(async (req, res) => {
+  const { registrations, meta } = await companyAnnouncementService.listOwnRegistrations(
+    scopeFrom(req),
+    req.params.id,
+    parsedQuery<ListAnnouncementRegistrationsQuery>(req),
+  );
+  sendData(res, registrations, meta);
+});
+
+/** A file, not the JSON envelope, as the console's is. */
+export const announcementRegistrationsCsv = catchAsync(async (req, res) => {
+  const { filename, csv } = await companyAnnouncementService.ownRegistrationsCsv(scopeFrom(req), req.params.id);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).send(csv);
 });

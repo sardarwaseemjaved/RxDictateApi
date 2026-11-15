@@ -167,6 +167,12 @@ export const ACTIONS = [
   'announcement.registrations.read',
   // A clinic member seeing what is meant for them, reminding themselves and registering.
   'announcement.view',
+  // A company sending its own announcement to the review queue, and following
+  // it afterwards: its list with totals, and who registered for its events.
+  'announcement.submit',
+  // Who was shown what, person by person, in RxDictate's console. Never a
+  // company's, and every read is audited.
+  'announcement.people.read',
 ] as const;
 
 export const actionSchema = z.enum(ACTIONS);

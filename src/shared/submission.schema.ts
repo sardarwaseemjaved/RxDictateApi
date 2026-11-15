@@ -4,6 +4,7 @@ import { organisationStatusSchema, organisationTypeSchema } from './roles';
 import { drugViewSchema } from './drug.schema';
 import { medicineFormSchema } from './prescription.schema';
 import { claimProductBodySchema, productFieldsSchema, updateProductBodySchema } from './company.schema';
+import { announcementAllowanceViewSchema, companyAnnouncementPayloadSchema } from './announcement.schema';
 import { submissionStatusSchema, submissionTypeSchema, type SubmissionType } from './submissionStatus';
 
 export { submissionStatusSchema, submissionTypeSchema, submissionSummarySchema } from './submissionStatus';
@@ -33,6 +34,8 @@ export type ProposalPayload = z.infer<typeof proposalPayloadSchema>;
  * - `drug.discontinue`: nothing; the product is `drugId`.
  * - `drug.claim`: the registration number. `drugId` is the row it names.
  * - `drug.propose`: the clinic's item as it was sent. `drugId` is that item.
+ * - `announcement.create`: the company's announcement and its wishes. The
+ *   submission's `drugId` stays null; a product is `payload.drugId`.
  */
 export const SUBMISSION_PAYLOAD_SCHEMAS = {
   'drug.create': productFieldsSchema,
@@ -40,6 +43,7 @@ export const SUBMISSION_PAYLOAD_SCHEMAS = {
   'drug.discontinue': z.object({}),
   'drug.claim': claimProductBodySchema,
   'drug.propose': proposalPayloadSchema,
+  'announcement.create': companyAnnouncementPayloadSchema,
 } satisfies Record<SubmissionType, z.ZodType>;
 
 /* ------------------------------------------------------------------ *
@@ -73,7 +77,8 @@ export const submissionViewSchema = z.object({
   /**
    * What the submission is about, in a few words, for a list row. A new
    * product is named by its payload; anything else by the row `drugId` names,
-   * as that row is now. Null only when there is nothing to name it by.
+   * as that row is now. Null only when there is nothing to name it by, and
+   * always for an announcement, which the apps name by `payload.title`.
    */
   subject: z.object({ brand: z.string(), strength: z.string().nullable() }).nullable(),
   /** Who sent it. */
@@ -96,6 +101,8 @@ export const submissionViewSchema = z.object({
   duplicateOfId: objectIdSchema.nullable(),
   /** Once approved: the national row it made or changed, or, for a merged proposal, the row it went into. */
   resultDrugId: objectIdSchema.nullable(),
+  /** Once an `announcement.create` is approved: the draft it made in RxDictate's console. */
+  resultAnnouncementId: objectIdSchema.nullable(),
   history: z.array(submissionHistoryEntrySchema),
   /** When it was last sent, which is what the queue is ordered by. */
   submittedAt: z.coerce.date(),
@@ -112,11 +119,15 @@ export type SubmissionView = z.infer<typeof submissionViewSchema>;
  * - `duplicates`: for a reviewer, national rows that may be the same product -
  *   the same registration number, or the same brand, strength and form among
  *   active ones. Always empty for a sender.
+ * - `allowance`: for an `announcement.create` only, the sending company's
+ *   announcement allowance and this month's use, for the reviewer and the
+ *   sender alike. Null for every other type.
  */
 export const submissionDetailViewSchema = z.object({
   submission: submissionViewSchema,
   current: drugViewSchema.nullable(),
   duplicates: z.array(drugViewSchema),
+  allowance: announcementAllowanceViewSchema.nullable(),
 });
 export type SubmissionDetailView = z.infer<typeof submissionDetailViewSchema>;
 
@@ -142,7 +153,8 @@ export type ListSubmissionsQuery = z.infer<typeof listSubmissionsQuerySchema>;
  * `POST /submissions/:id/approve`. A `drug.propose` needs `decision`:
  * `publish` makes the clinic's row national with the same id; `merge` moves
  * its list items and usage into `intoDrugId`, an active national row, and
- * retires it. Other types take neither.
+ * retires it. Other types take neither. An `announcement.create` becomes a
+ * draft with the company as sponsor, which is published from the console.
  */
 export const approveSubmissionBodySchema = z
   .object({

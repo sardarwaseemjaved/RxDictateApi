@@ -4,7 +4,9 @@ import { announcementValidation } from '../../validations';
 import requireAuth from '../../middlewares/requireAuth';
 import validate from '../../middlewares/validate';
 import { PLATFORM_ONLY, resolveLocationIfSent, resolveOrganisation, resolvePractice } from '../../core/tenancy';
-import { requireCan } from '../../core/permissions';
+import { requireCan, requireCanAny, requireCanFor } from '../../core/permissions';
+import { parsedQuery } from '../../utils/request';
+import type { ListAnnouncementsQuery } from '../../shared/announcement.schema';
 
 const router = express.Router();
 
@@ -14,12 +16,16 @@ const router = express.Router();
  * - RxDictate's console (the platform) writes, publishes and measures them;
  * - a clinic member sees what is meant for them and acts on it. X-Location-Id
  *   is welcome on the slots: it decides which location's city and province
- *   the audience is matched against.
+ *   the audience is matched against;
+ * - a company uploads a picture and counts an audience by rule for the one
+ *   it sends for review, which it sends at /company/announcements.
  *
- * A company reaches none of this in this phase, and a patient never does.
- * The member routes come first, so /slots is never read as an id.
+ * A patient never reaches any of it. The member routes come first, so /slots
+ * is never read as an id; so do /images, /audience-count, /people, /products
+ * and /reach.
  */
 const platform = [requireAuth, resolveOrganisation(PLATFORM_ONLY)];
+const platformOrCompany = [requireAuth, resolveOrganisation(['platform', 'company'])];
 const member = [requireAuth, resolvePractice, resolveLocationIfSent, requireCan('announcement.view')];
 
 /* A clinic member. */
@@ -38,11 +44,15 @@ router.delete('/:id/register', ...member, validate(announcementValidation.unregi
 
 /* The console. */
 
+// One person's record of each needs announcement.people.read as well.
 router.get(
   '/',
   ...platform,
   requireCan('announcement.read'),
   validate(announcementValidation.listAnnouncements),
+  requireCanFor((req) =>
+    parsedQuery<ListAnnouncementsQuery>(req).userId ? 'announcement.people.read' : 'announcement.read',
+  ),
   announcementController.listAnnouncements,
 );
 
@@ -56,18 +66,35 @@ router.post(
 
 router.post(
   '/images',
-  ...platform,
-  requireCan('announcement.create'),
+  ...platformOrCompany,
+  requireCanAny(['announcement.create', 'announcement.submit']),
   validate(announcementValidation.createImageUpload),
   announcementController.createImageUpload,
 );
 
 router.post(
   '/audience-count',
-  ...platform,
-  requireCan('announcement.read'),
+  ...platformOrCompany,
+  requireCanAny(['announcement.read', 'announcement.submit']),
   validate(announcementValidation.audienceCount),
   announcementController.audienceCount,
+);
+
+router.get(
+  '/people',
+  ...platform,
+  requireCan('announcement.create'),
+  validate(announcementValidation.searchPeople),
+  announcementController.searchPeople,
+);
+
+router.get(
+  '/reach',
+  ...platform,
+  requireCan('announcement.read'),
+  requireCan('announcement.people.read'),
+  validate(announcementValidation.reach),
+  announcementController.reach,
 );
 
 router.get(

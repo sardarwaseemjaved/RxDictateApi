@@ -35,6 +35,9 @@ const member = (practiceId: Types.ObjectId, userId: Types.ObjectId): Audience =>
 
 const everyone = (practiceId: Types.ObjectId): Audience => ({ to: 'practice', practiceId: String(practiceId) });
 
+/** Every open clinic app, wherever it is: the members who see announcements in slots. */
+const clinicMembers: Audience = { to: 'holders', action: 'announcement.view' };
+
 /** Everyone who may see this patient: the doctors, and the assistants at a location they are linked to. */
 const whoSees = async (practiceId: Types.ObjectId, patientId: Types.ObjectId): Promise<Audience | null> => {
   const patient = await Patient.findOne({ _id: patientId, practiceId }).select('locationIds');
@@ -148,12 +151,22 @@ on('settings.changed', (change) => {
   const audience = settingsAudience(change);
   tell(audience, 'settings');
   if (change.keys.includes('announcements.sponsored')) {
-    tell(audience, 'announcements');
+    // What the slots show changed, which is news to clinic apps only.
+    tell(change.layer === 'platform' ? clinicMembers : audience, 'announcements');
   }
 });
 
-/* Announcements, to every open clinic app (deliver keeps it to clinic members), which refetches its slots. */
-on('announcement.changed', ({ announcementId }) => tell({ to: 'all' }, 'announcements', announcementId));
+/*
+ * Announcements: every open clinic app refetches its slots once one is no
+ * longer a draft, and the sponsor company's own apps hear about theirs alone,
+ * never another company's.
+ */
+on('announcement.changed', ({ announcementId, toClinics, sponsorIds }) => {
+  if (toClinics) {
+    tell(clinicMembers, 'announcements', announcementId);
+  }
+  sponsorIds.forEach((sponsorId) => tell(everyone(sponsorId), 'announcements', announcementId));
+});
 
 /* Medicines, to whoever the changed list or item belongs to. */
 on('medicines.changed', (change) => {

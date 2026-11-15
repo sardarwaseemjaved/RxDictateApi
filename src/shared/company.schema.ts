@@ -5,6 +5,7 @@ import { medicineFormSchema } from './prescription.schema';
 import { organisationStatusSchema } from './roles';
 import { drugStatusSchema } from './drug.schema';
 import { submissionSummarySchema } from './submissionStatus';
+import { announcementAllowanceSchema, announcementAllowanceViewSchema } from './announcement.schema';
 
 /* ------------------------------------------------------------------ *
  * Companies, as RxDictate sees and makes them
@@ -27,6 +28,8 @@ export const companyViewSchema = z.object({
   contactPhone: phoneSchema.nullable(),
   status: organisationStatusSchema,
   suspendedAt: z.coerce.date().nullable(),
+  /** What RxDictate lets it publish, and this month's use. Both limits null until RxDictate sets one. */
+  announcementAllowance: announcementAllowanceViewSchema,
   createdAt: z.coerce.date(),
 });
 export type CompanyView = z.infer<typeof companyViewSchema>;
@@ -61,9 +64,12 @@ export const createCompanyBodySchema = z.object({
 });
 export type CreateCompanyBody = z.infer<typeof createCompanyBodySchema>;
 
-/** `PATCH /companies/:id`. Status changes only through suspend and reactivate. */
+/**
+ * `PATCH /companies/:id`. Status changes only through suspend and reactivate.
+ * `announcementAllowance` is replaced whole; null in either part is no limit.
+ */
 export const updateCompanyBodySchema = z
-  .object(companyFields)
+  .object({ ...companyFields, announcementAllowance: announcementAllowanceSchema })
   .partial()
   .refine((body) => Object.keys(body).length > 0, 'nothing to change');
 export type UpdateCompanyBody = z.infer<typeof updateCompanyBodySchema>;

@@ -34,6 +34,12 @@ export interface IPractice {
   secpRegNo: string | null;
   drapLicenceNo: string | null;
   contactPhone: string | null;
+  /**
+   * A company's: what RxDictate lets it publish. Null in either part is no
+   * limit, and both start null. What has been used is counted, not stored
+   * here (announcementAllowance.service).
+   */
+  announcementAllowance: { postsPerMonth: number | null; peoplePerPost: number | null };
   ownerId: Types.ObjectId;
   pmdcNo: string;
   qualifications: string[];
@@ -72,6 +78,10 @@ const practiceSchema = new Schema<IPractice>(
     secpRegNo: { type: String, default: null, trim: true },
     drapLicenceNo: { type: String, default: null, trim: true },
     contactPhone: { type: String, default: null },
+    announcementAllowance: {
+      postsPerMonth: { type: Number, default: null },
+      peoplePerPost: { type: Number, default: null },
+    },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     pmdcNo: { type: String, default: '', trim: true },
     qualifications: { type: [String], default: [] },

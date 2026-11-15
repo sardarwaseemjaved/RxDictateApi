@@ -43,6 +43,8 @@ export interface ISubmission {
   note: string | null;
   duplicateOfId: Types.ObjectId | null;
   resultDrugId: Types.ObjectId | null;
+  /** Once an `announcement.create` is approved: the draft it made. */
+  resultAnnouncementId: Types.ObjectId | null;
   history: ISubmissionStep[];
   submittedAt: Date;
   createdBy: Types.ObjectId;
@@ -85,6 +87,7 @@ const submissionSchema = new Schema<ISubmission>(
     note: { type: String, default: null },
     duplicateOfId: { type: Schema.Types.ObjectId, ref: 'Drug', default: null },
     resultDrugId: { type: Schema.Types.ObjectId, ref: 'Drug', default: null },
+    resultAnnouncementId: { type: Schema.Types.ObjectId, ref: 'Announcement', default: null },
     history: { type: [stepSchema], default: [] },
     submittedAt: { type: Date, required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },

@@ -1,5 +1,5 @@
 import type { Types } from 'mongoose';
-import { Location, Membership, Practice, User, type IAnnouncementAudience } from '../models';
+import { Location, Membership, Practice, User, type IAnnouncementAudience, type MembershipDoc } from '../models';
 import type { Scope } from '../core/db';
 import { allowedLocationsFor } from '../core/tenancy';
 import { audienceRoleSchema, type AnnouncementAudience, type AudienceRole } from '../shared/announcement.schema';
@@ -73,23 +73,15 @@ export const memberFor = async (scope: Scope): Promise<AudienceMember> => {
 };
 
 /**
- * How many people an audience reaches now: active members of clinics, in a
- * clinic role, who match. A person in two clinics counts once. Reads every
- * clinic membership the role and organisation filters leave, which is fine at
- * this scale; a larger one would push the filters into the query.
+ * Members as the audience sees them, from active memberships rather than from
+ * a request: every location each may work at, since no app is open. Only
+ * memberships in a clinic that still exists come back. Three queries, however
+ * many memberships.
  */
-export const countAudience = async (audience: AnnouncementAudience): Promise<number> => {
-  const roles = audience.roles.length > 0 ? audience.roles : audienceRoleSchema.options;
-  const memberships = await Membership.find({
-    status: 'active',
-    role: { $in: roles },
-    ...(audience.organisationIds.length > 0 ? { practiceId: { $in: audience.organisationIds } } : {}),
-    ...(audience.userIds.length > 0 ? { userId: { $in: audience.userIds } } : {}),
-  }).select('userId practiceId role locationIds');
+const membersFrom = async (memberships: MembershipDoc[]): Promise<AudienceMember[]> => {
   if (memberships.length === 0) {
-    return 0;
+    return [];
   }
-
   const practiceIds = [...new Set(memberships.map((membership) => String(membership.practiceId)))];
   const userIds = [...new Set(memberships.map((membership) => String(membership.userId)))];
   const [clinics, locations, users] = await Promise.all([
@@ -102,11 +94,10 @@ export const countAudience = async (audience: AnnouncementAudience): Promise<num
   const isClinic = new Set(clinics.map((clinic) => String(clinic._id)));
   const specialtiesOf = new Map(users.map((user) => [String(user._id), user.specialties]));
 
-  const reached = new Set<string>();
-  memberships.forEach((membership) => {
+  return memberships.flatMap((membership) => {
     const organisationId = String(membership.practiceId);
     if (!isClinic.has(organisationId)) {
-      return;
+      return [];
     }
     const allowed = allowedLocationsFor(membership.role, membership.locationIds);
     const theirs = locations.filter(
@@ -114,13 +105,47 @@ export const countAudience = async (audience: AnnouncementAudience): Promise<num
         String(location.practiceId) === organisationId &&
         (allowed === 'all' || allowed.some((id: Types.ObjectId) => id.equals(location._id))),
     );
-    const member: AudienceMember = {
-      userId: String(membership.userId),
-      organisationId,
-      role: membership.role,
-      specialties: specialtiesOf.get(String(membership.userId)) ?? [],
-      locations: theirs.map((location) => ({ province: location.province, city: location.city })),
-    };
+    return [
+      {
+        userId: String(membership.userId),
+        organisationId,
+        role: membership.role,
+        specialties: specialtiesOf.get(String(membership.userId)) ?? [],
+        locations: theirs.map((location) => ({ province: location.province, city: location.city })),
+      },
+    ];
+  });
+};
+
+/**
+ * One person, once for each clinic they are active in now, in a clinic role.
+ * Someone is in an audience when any of these matches it, which is what their
+ * slots would work out at any one of their clinics.
+ */
+export const membersOf = async (userId: Types.ObjectId | string): Promise<AudienceMember[]> =>
+  membersFrom(
+    await Membership.find({ userId, status: 'active', role: { $in: audienceRoleSchema.options } }).select(
+      'userId practiceId role locationIds',
+    ),
+  );
+
+/**
+ * How many people an audience reaches now: active members of clinics, in a
+ * clinic role, who match. A person in two clinics counts once. Reads every
+ * clinic membership the role and organisation filters leave, which is fine at
+ * this scale; a larger one would push the filters into the query.
+ */
+export const countAudience = async (audience: AnnouncementAudience | IAnnouncementAudience): Promise<number> => {
+  const roles = audience.roles.length > 0 ? audience.roles : audienceRoleSchema.options;
+  const memberships = await Membership.find({
+    status: 'active',
+    role: { $in: roles },
+    ...(audience.organisationIds.length > 0 ? { practiceId: { $in: audience.organisationIds } } : {}),
+    ...(audience.userIds.length > 0 ? { userId: { $in: audience.userIds } } : {}),
+  }).select('userId practiceId role locationIds');
+
+  const reached = new Set<string>();
+  (await membersFrom(memberships)).forEach((member) => {
     if (matchesAudience(audience, member)) {
       reached.add(member.userId);
     }
@@ -128,4 +153,4 @@ export const countAudience = async (audience: AnnouncementAudience): Promise<num
   return reached.size;
 };
 
-export default { matchesAudience, memberFor, countAudience };
+export default { matchesAudience, memberFor, membersOf, countAudience };
