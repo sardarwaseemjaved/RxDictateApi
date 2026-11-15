@@ -7,9 +7,11 @@ import {
   Drug,
   Practice,
   User,
+  normaliseName,
   type AnnouncementDoc,
   type AnnouncementRegistrationDoc,
   type IAnnouncement,
+  type IDrug,
 } from '../models';
 import { AppError } from '../core/errors';
 import { writeAudit } from '../core/audit';
@@ -28,6 +30,7 @@ import type { UploadTicket } from '../shared/report.schema';
 import {
   announcementSchema,
   type AnnouncementAudience,
+  type AnnouncementProductView,
   type AnnouncementRegistrationView,
   type AnnouncementStatsView,
   type AnnouncementStep,
@@ -36,11 +39,12 @@ import {
   type CreateAnnouncementImageBody,
   type ListAnnouncementRegistrationsQuery,
   type ListAnnouncementsQuery,
+  type SearchAnnouncementProductsQuery,
   type UpdateAnnouncementBody,
 } from '../shared/announcement.schema';
 import { toCsv } from '../utils/csv';
 import { karachiClock, karachiDay } from '../utils/time';
-import { nationalRows } from './drugAccess.service';
+import { nationalRows, prefixOf } from './drugAccess.service';
 import { countAudience } from './announcementAudience.service';
 import { cancelReminders, rescheduleReminders } from './announcementReminder.service';
 
@@ -200,6 +204,61 @@ export const listAnnouncements = async (
 
 export const getAnnouncement = async (id: string): Promise<AnnouncementView> => viewOf(await findAnnouncement(id));
 
+/** Active national products only: no clinic scope, lists, usage or settings. */
+export const searchProducts = async (query: SearchAnnouncementProductsQuery): Promise<AnnouncementProductView[]> => {
+  const typed = normaliseName(query.q);
+  const prefix = prefixOf(typed).source;
+  const contains = prefix.slice(1);
+  const fields = ['brand', 'generic', 'drapRegNo'];
+  const drugs = await Drug.aggregate<IDrug & { _id: Types.ObjectId }>([
+    {
+      $match: {
+        ...nationalRows,
+        status: 'active',
+        ...(query.sponsorId ? { companyId: new Types.ObjectId(query.sponsorId) } : {}),
+        ...(typed ? { $or: fields.map((field) => ({ [field]: { $regex: contains, $options: 'i' } })) } : {}),
+      },
+    },
+    {
+      $set: {
+        rank: {
+          $switch: {
+            branches: [
+              { case: { $eq: ['$brandKey', typed] }, then: 0 },
+              {
+                case: {
+                  $or: fields.map((field) => ({
+                    $regexMatch: { input: { $ifNull: [`$${field}`, ''] }, regex: prefix, options: 'i' },
+                  })),
+                },
+                then: 1,
+              },
+            ],
+            default: 2,
+          },
+        },
+      },
+    },
+    { $sort: { rank: 1, brandKey: 1, strength: 1, _id: 1 } },
+    { $limit: query.limit },
+  ]);
+  const companyIds = [...new Set(drugs.flatMap((drug) => (drug.companyId ? [String(drug.companyId)] : [])))];
+  const companies = new Map(
+    (companyIds.length ? await Practice.find({ _id: { $in: companyIds }, type: 'company' }).select('name') : []).map(
+      (company) => [String(company._id), { id: String(company._id), name: company.name }],
+    ),
+  );
+  return drugs.map((drug) => ({
+    id: String(drug._id),
+    brand: drug.brand,
+    strength: drug.strength,
+    form: drug.form,
+    composition: drug.generic,
+    registrationNo: drug.drapRegNo,
+    company: drug.companyId ? (companies.get(String(drug.companyId)) ?? null) : null,
+  }));
+};
+
 /* ------------------------------------------------------------------ *
  * Writing
  * ------------------------------------------------------------------ */
@@ -228,9 +287,12 @@ const checkReferences = async (scope: Scope, fields: CreateAnnouncementBody): Pr
     }
   }
   if (fields.drugId) {
-    const drug = await Drug.exists({ ...nationalRows, _id: fields.drugId, status: 'active' });
+    const drug = await Drug.findOne({ ...nationalRows, _id: fields.drugId, status: 'active' }).select('companyId');
     if (!drug) {
       throw invalid('drugId', 'is not an active national medicine');
+    }
+    if (fields.kind === 'product' && (!drug.companyId || String(drug.companyId) !== fields.sponsorId)) {
+      throw invalid('drugId', 'must be a product owned by the sponsor; unclaimed medicines must be claimed first');
     }
   }
   const { organisationIds, userIds } = fields.audience;

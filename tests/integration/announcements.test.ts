@@ -1,13 +1,18 @@
 import request from 'supertest';
+import { Types } from 'mongoose';
 import app from '../../src/app';
 import setupTestDB from '../utils/setupTestDB';
 import { aClinic, aPa, aPlatformAdmin, headersFor, signIn, waitFor, type SignedIn } from '../fixtures/clinic.fixture';
 import { signedIn, startLive, type Live, type LiveClient } from '../fixtures/realtime.fixture';
-import { Announcement, AuditLog, Drug, Job, Location, Notification, User } from '../../src/models';
+import { Announcement, AuditLog, Drug, Job, Location, Notification, User, drugKeys, type IDrug } from '../../src/models';
 import { importDrugs } from '../../src/services/drugImport.service';
 import { runDueJobs } from '../../src/services/job.service';
 import { matchesAudience, type AudienceMember } from '../../src/services/announcementAudience.service';
-import { announcementAudienceSchema } from '../../src/shared/announcement.schema';
+import {
+  announcementAudienceSchema,
+  announcementProductViewSchema,
+  type AnnouncementProductView,
+} from '../../src/shared/announcement.schema';
 
 setupTestDB();
 jest.setTimeout(60_000);
@@ -90,6 +95,11 @@ const theCast = async (base: number) => {
   return { platformAdmin, contentManager, doctor };
 };
 
+const aCatalogProduct = async (brand: string, fields: Partial<IDrug> = {}) => {
+  const values = { brand, generic: 'Paracetamol 500mg', strength: '500mg', form: 'tab' as const, ...fields };
+  return Drug.create({ source: 'drapImport', scope: 'national', status: 'active', ...values, ...drugKeys(values) });
+};
+
 /* ------------------------------------------------------------------ *
  * Permissions
  * ------------------------------------------------------------------ */
@@ -149,6 +159,8 @@ describe('Permissions', () => {
       ),
     );
     const drug = (await Drug.findOne({ drapRegNo: 'R-1' }))!;
+    // A DRAP row must be claimed before its company can promote it.
+    await Drug.updateOne({ _id: drug._id }, { $set: { companyId: company.id } });
     const post = (body: object) => request(app).post('/api/v1/announcements').set(headersFor(contentManager)).send(body);
 
     await post({ ...UPDATE, cta: 'register' }).expect(400);
@@ -178,6 +190,267 @@ describe('Permissions', () => {
       .set(headersFor(contentManager))
       .send({ sponsorId: null })
       .expect(400);
+  });
+});
+
+describe('Product search', () => {
+  const search = (actor: SignedIn, query: object = {}) =>
+    request(app).get('/api/v1/announcements/products').set(headersFor(actor)).query(query);
+
+  test('requires announcement.create, including on a blank query', async () => {
+    const { platformAdmin, contentManager, doctor } = await theCast(12);
+    const reviewer = await aPlatformMember(platformAdmin, '+923018812099', 'reviewer');
+    const { companyAdmin } = await aCompany(platformAdmin, '+923018812098');
+    const pa = await aPa(doctor, '+923018812097');
+    await request(app)
+      .post('/api/v1/members')
+      .set(headersFor(doctor))
+      .send({ phone: '+923018812096', role: 'medicineManager' })
+      .expect(201);
+    const medicineManager = await signIn('+923018812096');
+    await request(app).get('/api/v1/announcements/products').expect(401);
+    await search(platformAdmin).expect(200);
+    await search(contentManager).expect(200);
+    await Promise.all(
+      [reviewer, doctor, companyAdmin, pa, medicineManager].map(async (actor) => {
+        const denied = await search(actor).expect(403);
+        expect(denied.body.error.code).toBe('FORBIDDEN');
+      }),
+    );
+  });
+
+  test('only active national rows, with the catalog fields and company identity', async () => {
+    const { platformAdmin, contentManager, doctor } = await theCast(13);
+    const { company } = await aCompany(platformAdmin, '+923018813099');
+    const own = await aCatalogProduct('Zentra', { companyId: new Types.ObjectId(company.id), drapRegNo: 'REG-001' });
+    const unclaimed = await aCatalogProduct('Zentra Unclaimed', { company: 'Acme Pharma' });
+    await Promise.all(
+      (['pending', 'rejected', 'discontinued'] as const).map((status) => aCatalogProduct(`Zentra ${status}`, { status })),
+    );
+    const clinicProduct = await aCatalogProduct('Zentra Clinic', {
+      scope: 'clinic',
+      source: 'clinic',
+      practiceId: new Types.ObjectId(doctor.practiceId),
+    });
+    await aCatalogProduct('Zentra Doctor', {
+      scope: 'doctor',
+      source: 'typed',
+      practiceId: new Types.ObjectId(doctor.practiceId),
+      ownerId: new Types.ObjectId(doctor.userId),
+    });
+    // Even a wrongly scoped national row with a clinic/doctor owner is excluded.
+    await aCatalogProduct('Zentra Wrong Clinic', { practiceId: new Types.ObjectId(doctor.practiceId) });
+    await aCatalogProduct('Zentra Wrong Doctor', { ownerId: new Types.ObjectId(doctor.userId) });
+
+    await request(app)
+      .patch('/api/v1/settings/platform')
+      .set(headersFor(platformAdmin))
+      .send({ values: [{ key: 'medicines.source', value: 'myList', locked: true }] })
+      .expect(200);
+    await request(app)
+      .put(`/api/v1/drug-lists/clinic/items/${clinicProduct._id}`)
+      .set(headersFor(doctor))
+      .send({})
+      .expect(200);
+    await request(app).put(`/api/v1/drug-lists/me/items/${own._id}`).set(headersFor(doctor)).send({}).expect(200);
+
+    const found = await search(contentManager, { q: 'zentra' }).expect(200);
+    expect(found.body.data).toEqual([
+      {
+        id: String(own._id),
+        brand: 'Zentra',
+        strength: '500mg',
+        form: 'tab',
+        composition: 'Paracetamol 500mg',
+        registrationNo: 'REG-001',
+        company: { id: company.id, name: company.name },
+      },
+      {
+        id: String(unclaimed._id),
+        brand: 'Zentra Unclaimed',
+        strength: '500mg',
+        form: 'tab',
+        composition: 'Paracetamol 500mg',
+        registrationNo: null,
+        company: null,
+      },
+    ]);
+    found.body.data.forEach((row: AnnouncementProductView) => expect(announcementProductViewSchema.parse(row)).toEqual(row));
+  });
+
+  test('matches brand, composition and registration literally, exact brand then prefix then the rest, before limiting', async () => {
+    const { contentManager } = await theCast(14);
+    await aCatalogProduct('A Zentra');
+    await aCatalogProduct('Zentra Plus');
+    await aCatalogProduct('Zentra');
+    await aCatalogProduct('Beta', { generic: 'Zentra ingredient' });
+    await aCatalogProduct('Delta', { drapRegNo: 'ZENTRA-009' });
+    await aCatalogProduct('Alpha', { generic: 'Other Zentra ingredient' });
+    await aCatalogProduct('Omega', { drapRegNo: 'R-ZENTRA-010' });
+    await aCatalogProduct('Aliases only', { aliases: ['Zentra'] });
+    await aCatalogProduct('Company only', { company: 'Zentra' });
+    const found = await search(contentManager, { q: '  ZeNtRa  ' }).expect(200);
+    expect(found.body.data.map((row: AnnouncementProductView) => row.brand)).toEqual([
+      'Zentra',
+      'Beta',
+      'Delta',
+      'Zentra Plus',
+      'A Zentra',
+      'Alpha',
+      'Omega',
+    ]);
+    const limited = await search(contentManager, { q: 'Zentra', limit: 1 }).expect(200);
+    expect(limited.body.data.map((row: AnnouncementProductView) => row.brand)).toEqual(['Zentra']);
+    await aCatalogProduct('Literal [Z]+');
+    const literal = await search(contentManager, { q: '[z]+' }).expect(200);
+    expect(literal.body.data.map((row: AnnouncementProductView) => row.brand)).toEqual(['Literal [Z]+']);
+    expect((await search(contentManager, { q: 'nothing matches' }).expect(200)).body.data).toEqual([]);
+  });
+
+  test('sponsorId filters companyId, including with blank or missing q', async () => {
+    const { platformAdmin, contentManager } = await theCast(15);
+    const { company } = await aCompany(platformAdmin, '+923018815099');
+    const { company: other } = await aCompany(platformAdmin, '+923018815098', 'Other Pharma');
+    const first = await aCatalogProduct('Alpha', { companyId: new Types.ObjectId(company.id), company: 'Old spelling' });
+    const second = await aCatalogProduct('Beta', { companyId: new Types.ObjectId(company.id), source: 'company' });
+    await aCatalogProduct('Alpha Other', { companyId: new Types.ObjectId(other.id), company: company.name });
+    await aCatalogProduct('Alpha Unclaimed', { company: company.name });
+    await aCatalogProduct('Alpha Discontinued', { companyId: new Types.ObjectId(company.id), status: 'discontinued' });
+    await Promise.all(
+      [{ sponsorId: company.id }, { q: '  ', sponsorId: company.id }].map(async (query) => {
+        const found = await search(contentManager, query).expect(200);
+        expect(found.body.data.map((row: AnnouncementProductView) => row.id)).toEqual([
+          String(first._id),
+          String(second._id),
+        ]);
+        expect(found.body.data.every((row: AnnouncementProductView) => row.company?.id === company.id)).toBe(true);
+      }),
+    );
+    const narrowed = await search(contentManager, { q: 'alpha', sponsorId: company.id }).expect(200);
+    expect(narrowed.body.data.map((row: AnnouncementProductView) => row.id)).toEqual([String(first._id)]);
+    expect((await search(contentManager, { sponsorId: new Types.ObjectId().toHexString() }).expect(200)).body.data).toEqual(
+      [],
+    );
+  });
+
+  test('limit defaults to 20 and accepts 1 through 50; malformed queries are validation errors', async () => {
+    const { contentManager } = await theCast(16);
+    await Promise.all(Array.from({ length: 51 }, (_, i) => aCatalogProduct(`Product ${String(i).padStart(2, '0')}`)));
+    expect((await search(contentManager).expect(200)).body.data).toHaveLength(20);
+    expect((await search(contentManager, { limit: 1 }).expect(200)).body.data).toHaveLength(1);
+    expect((await search(contentManager, { limit: 50 }).expect(200)).body.data).toHaveLength(50);
+    await Promise.all(
+      [{ limit: 0 }, { limit: 51 }, { limit: 1.5 }, { limit: 'bad' }, { sponsorId: 'bad' }, { q: 'x'.repeat(121) }].map(
+        async (query) => {
+          expect((await search(contentManager, query).expect(400)).body.error.code).toBe('VALIDATION_ERROR');
+        },
+      ),
+    );
+  });
+});
+
+describe('Product ownership', () => {
+  test('create rejects another company or an unclaimed DRAP row; updates can still be sponsored', async () => {
+    const { platformAdmin, contentManager } = await theCast(17);
+    const { company } = await aCompany(platformAdmin, '+923018817099');
+    const { company: other } = await aCompany(platformAdmin, '+923018817098', 'Other Pharma');
+    const own = await aCatalogProduct('Own', { companyId: new Types.ObjectId(company.id) });
+    const unclaimed = await aCatalogProduct('Unclaimed', { company: other.name });
+    const discontinued = await aCatalogProduct('Discontinued', {
+      companyId: new Types.ObjectId(other.id),
+      status: 'discontinued',
+    });
+    const post = (body: object) => request(app).post('/api/v1/announcements').set(headersFor(contentManager)).send(body);
+    await Promise.all(
+      [String(own._id), String(unclaimed._id)].map(async (drugId) => {
+        const refused = await post({ ...UPDATE, kind: 'product', sponsorId: other.id, drugId }).expect(400);
+        expect(refused.body.error).toMatchObject({
+          code: 'VALIDATION_ERROR',
+          details: [{ field: 'body.drugId', message: expect.stringContaining('owned by the sponsor') }],
+        });
+      }),
+    );
+    expect(await Announcement.countDocuments()).toBe(0);
+    expect(await AuditLog.countDocuments({ action: 'announcement.create' })).toBe(0);
+    const inactive = await post({
+      ...UPDATE,
+      kind: 'product',
+      sponsorId: other.id,
+      drugId: String(discontinued._id),
+    }).expect(400);
+    expect(inactive.body.error.details).toEqual([{ field: 'body.drugId', message: 'is not an active national medicine' }]);
+    await post({ ...UPDATE, kind: 'product', sponsorId: company.id, drugId: String(own._id) }).expect(201);
+    await post({ ...UPDATE, sponsorId: other.id }).expect(201);
+  });
+
+  test('every edit checks the resulting kind, drug and sponsor, including published and existing invalid announcements', async () => {
+    const { platformAdmin, contentManager } = await theCast(18);
+    const { company } = await aCompany(platformAdmin, '+923018818099');
+    const { company: other } = await aCompany(platformAdmin, '+923018818098', 'Other Pharma');
+    const own = await aCatalogProduct('Own', { companyId: new Types.ObjectId(company.id) });
+    const theirs = await aCatalogProduct('Theirs', { companyId: new Types.ObjectId(other.id) });
+    const unclaimed = await aCatalogProduct('Unclaimed');
+    const created = await request(app)
+      .post('/api/v1/announcements')
+      .set(headersFor(contentManager))
+      .send({ ...UPDATE, kind: 'product', drugId: String(own._id), sponsorId: company.id })
+      .expect(201);
+    const { id } = created.body.data;
+    const edit = (body: object) =>
+      request(app).patch(`/api/v1/announcements/${id}`).set(headersFor(contentManager)).send(body);
+    const refuseEdit = async (body: object) => {
+      expect((await edit(body).expect(400)).body.error.details[0].field).toBe('body.drugId');
+    };
+    await refuseEdit({ sponsorId: other.id });
+    await refuseEdit({ drugId: String(theirs._id) });
+    await refuseEdit({ drugId: String(unclaimed._id) });
+    expect((await Announcement.findById(id))?.history).toHaveLength(1);
+    await edit({ sponsorId: other.id, drugId: String(theirs._id) }).expect(200);
+    await request(app).post(`/api/v1/announcements/${id}/publish`).set(headersFor(contentManager)).expect(200);
+    await edit({ sponsorId: company.id }).expect(400);
+    await edit({ sponsorId: company.id, drugId: String(own._id) }).expect(200);
+    await edit({ kind: 'update', drugId: null, sponsorId: other.id }).expect(200);
+    await edit({ kind: 'product', drugId: String(own._id) }).expect(400);
+    await edit({ kind: 'product', drugId: String(theirs._id) }).expect(200);
+
+    // Simulate an existing invalid row. Refusing an unrelated edit leaves it intact.
+    await Announcement.updateOne({ _id: id }, { $set: { sponsorId: company.id } });
+    const before = (await Announcement.findById(id))!.toObject();
+    const refused = await edit({ title: 'Unrelated edit' }).expect(400);
+    expect(refused.body.error.details[0].field).toBe('body.drugId');
+    expect((await Announcement.findById(id))!.toObject()).toEqual(before);
+    await edit({ drugId: String(own._id) }).expect(200);
+  });
+
+  test('publish rechecks ownership after a draft was saved, leaving a refused draft unchanged', async () => {
+    const { platformAdmin, contentManager } = await theCast(19);
+    const { company } = await aCompany(platformAdmin, '+923018819099');
+    const { company: other } = await aCompany(platformAdmin, '+923018819098', 'Other Pharma');
+    const own = await aCatalogProduct('Own', { companyId: new Types.ObjectId(company.id) });
+    const draft = await request(app)
+      .post('/api/v1/announcements')
+      .set(headersFor(contentManager))
+      .send({ ...UPDATE, kind: 'product', drugId: String(own._id), sponsorId: company.id })
+      .expect(201);
+    const { id } = draft.body.data;
+    const refusePublish = async (companyId: string | null) => {
+      await Drug.updateOne({ _id: own._id }, { $set: { companyId } });
+      const refused = await request(app)
+        .post(`/api/v1/announcements/${id}/publish`)
+        .set(headersFor(contentManager))
+        .expect(400);
+      expect(refused.body.error).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        details: [{ field: 'body.drugId', message: expect.any(String) }],
+      });
+      expect((await Announcement.findById(id))?.status).toBe('draft');
+      expect((await Announcement.findById(id))?.history).toHaveLength(1);
+    };
+    await refusePublish(other.id);
+    await refusePublish(null);
+    expect(await AuditLog.countDocuments({ action: 'announcement.publish' })).toBe(0);
+    await Drug.updateOne({ _id: own._id }, { $set: { companyId: company.id } });
+    await request(app).post(`/api/v1/announcements/${id}/publish`).set(headersFor(contentManager)).expect(200);
   });
 });
 

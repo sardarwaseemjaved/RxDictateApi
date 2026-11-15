@@ -71,6 +71,14 @@ router.post(
 );
 
 router.get(
+  '/products',
+  ...platform,
+  requireCan('announcement.create'),
+  validate(announcementValidation.searchProducts),
+  announcementController.searchProducts,
+);
+
+router.get(
   '/:id',
   ...platform,
   requireCan('announcement.read'),

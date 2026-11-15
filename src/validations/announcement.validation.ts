@@ -8,11 +8,13 @@ import {
   listAnnouncementRegistrationsQuerySchema,
   listAnnouncementsQuerySchema,
   registerAnnouncementBodySchema,
+  searchAnnouncementProductsQuerySchema,
   updateAnnouncementBodySchema,
 } from '../shared/announcement.schema';
 
 // The console.
 export const listAnnouncements = { query: listAnnouncementsQuerySchema };
+export const searchProducts = { query: searchAnnouncementProductsQuerySchema };
 export const getAnnouncement = { params: idParamSchema };
 export const createAnnouncement = { body: createAnnouncementBodySchema };
 export const updateAnnouncement = { params: idParamSchema, body: updateAnnouncementBodySchema };

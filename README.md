@@ -923,13 +923,28 @@ its `history` and the audit log.
 - For a seminar or an event, `event: { startsAt, endsAt?, place?, onlineUrl? }`,
   with a place, an online link or both.
 - For a product, `drugId`: an active national medicine, shown by its brand and
-  strength. A product always has a sponsor.
+  strength. A product always has a sponsor, and the medicine's `companyId` must
+  equal that `sponsorId`. Create, every edit and publish check this; a mismatch
+  answers `VALIDATION_ERROR` naming `body.drugId`. An unclaimed DRAP row cannot
+  be promoted until its company claims it.
 - `sponsorId`: a company, or null for RxDictate's own. Anything with a sponsor,
   and every product, is `isSponsored` and labelled "Sponsored".
 - `showFrom` and `showUntil`: the window.
 - `audience`, `placements`, `priority` and `maxShows` (below).
 - `status`: `draft`, `published` or `withdrawn`. "Ended" is not a status: the
   views say `ended: true` for a published one whose window has passed.
+
+**Finding a product.** `GET /announcements/products?q=…&sponsorId=…&limit=…`
+needs `announcement.create`. It searches only active national medicines,
+independent of clinic lists and `medicines.source`. `q` matches brand,
+composition and registration number without case: exact brand first, then
+prefix matches, then the rest, each by brand, strength and id. `sponsorId`
+optionally narrows to that company's own products (`companyId`); a blank or
+omitted `q` lists them by name. `limit` is 1–50, default 20. The data array
+contains `{ id, brand, strength, form, composition, registrationNo, company }`,
+where `company` is `{ id, name }` or null for an unclaimed row, and
+`registrationNo` may be null. The shared contracts are
+`searchAnnouncementProductsQuerySchema` and `announcementProductViewSchema`.
 
 **The image.** As a report page is uploaded: `POST /announcements/images` with
 `{ contentType, size }` (JPEG or PNG, at most 2 MB) answers an upload ticket,

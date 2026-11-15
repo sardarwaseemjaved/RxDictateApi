@@ -1438,13 +1438,35 @@ paths:
       description: |
         Body createAnnouncementBodySchema. A seminar or an event needs event (startsAt, and a place or
         an online link); register and addToCalendar are only for those. A product needs drugId (an
-        active national medicine) and sponsorId (a company). imageKey must come from
+        active national medicine owned by sponsorId) and sponsorId (a company). Unclaimed medicines
+        cannot be promoted. An ownership mismatch is VALIDATION_ERROR naming body.drugId. imageKey must come from
         POST /announcements/images. An audience's organisationIds must be clinics. Nobody outside the
         console sees a draft.
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/PracticeId' }]
       responses:
         '201': { description: announcementViewSchema }
+        '400': { description: VALIDATION_ERROR }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /announcements/products:
+    get:
+      tags: [Announcements]
+      summary: Search active national products (announcement.create)
+      description: |
+        Independent of clinic lists and medicines.source. q matches brand, composition/generic and
+        registration number without case, ranked by exact brand, prefix, then the rest; ties by
+        brand, strength and id. sponsorId filters drug.companyId. A blank or omitted q lists products
+        by name. Each result is announcementProductViewSchema: id, brand, strength, form, composition,
+        registrationNo (nullable), company ({ id, name } or null for an unclaimed row).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/PracticeId' }
+        - { in: query, name: q, schema: { type: string, maxLength: 120, default: '' } }
+        - { in: query, name: sponsorId, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200': { description: 'An array of announcementProductViewSchema in data' }
         '400': { description: VALIDATION_ERROR }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -1518,6 +1540,7 @@ paths:
       description: |
         Body updateAnnouncementBodySchema: only what changes; audience and event are replaced whole.
         Checked as the whole announcement it leaves. A withdrawn one is ANNOUNCEMENT_WRONG_STATUS.
+        A product's drug.companyId must equal sponsorId on every edit, or VALIDATION_ERROR names body.drugId.
         Editing a published one tells clinic apps (announcements topic); moving its start moves the
         reminders not yet sent.
       security: [{ bearerAuth: [] }]
@@ -1534,13 +1557,15 @@ paths:
       summary: Publish a draft (platform admin, content manager)
       description: |
         Only a draft (ANNOUNCEMENT_WRONG_STATUS otherwise, with details.status). One whose window has
-        already passed is ANNOUNCEMENT_ENDED. Its medicine and sponsor are checked again.
+        already passed is ANNOUNCEMENT_ENDED. Its medicine and sponsor are checked again, including
+        drug.companyId equalling sponsorId for a product (VALIDATION_ERROR naming body.drugId otherwise).
       security: [{ bearerAuth: [] }]
       parameters:
         - { $ref: '#/components/parameters/PracticeId' }
         - { in: path, name: id, required: true, schema: { type: string } }
       responses:
         '200': { description: announcementViewSchema }
+        '400': { description: VALIDATION_ERROR }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: ANNOUNCEMENT_WRONG_STATUS or ANNOUNCEMENT_ENDED }

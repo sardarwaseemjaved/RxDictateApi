@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { objectIdSchema, paginationQuerySchema } from './common';
 import { citySchema, provinceSchema } from './location.schema';
 import { specialtySchema } from './specialties';
+import { medicineFormSchema } from './prescription.schema';
 
 /**
  * Announcements: seminars, events, updates and sponsored products, written and
@@ -141,7 +142,7 @@ const announcementFields = {
   cta: announcementCtaSchema.default('none'),
   /** Required for a seminar or an event; null for anything else. */
   event: announcementEventDetailsSchema.nullable().default(null),
-  /** Required for a product: an active national medicine. Null for anything else. */
+  /** Required for a product: an active national medicine owned by sponsorId. Null for anything else. */
   drugId: objectIdSchema.nullable().default(null),
   /** A company, or null for RxDictate's own. A product needs one. */
   sponsorId: objectIdSchema.nullable().default(null),
@@ -256,6 +257,27 @@ export const listAnnouncementsQuerySchema = paginationQuerySchema.extend({
   sponsorId: z.union([objectIdSchema, z.literal('none')]).optional(),
 });
 export type ListAnnouncementsQuery = z.infer<typeof listAnnouncementsQuerySchema>;
+
+/** The console's national catalog, independent of clinic lists and medicines.source. */
+export const searchAnnouncementProductsQuerySchema = z.object({
+  q: z.string().trim().max(120).default(''),
+  /** Only products owned by this company. A blank q lists them by name. */
+  sponsorId: objectIdSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type SearchAnnouncementProductsQuery = z.infer<typeof searchAnnouncementProductsQuerySchema>;
+
+/** One result of GET /announcements/products. An unclaimed DRAP row has no company. */
+export const announcementProductViewSchema = z.object({
+  id: objectIdSchema,
+  brand: z.string(),
+  strength: z.string(),
+  form: medicineFormSchema,
+  composition: z.string(),
+  registrationNo: z.string().nullable(),
+  company: z.object({ id: objectIdSchema, name: z.string() }).nullable(),
+});
+export type AnnouncementProductView = z.infer<typeof announcementProductViewSchema>;
 
 /** `POST /announcements/images`: somewhere to PUT one image. Answers an upload ticket, as reports do. */
 export const createAnnouncementImageBodySchema = z.object({

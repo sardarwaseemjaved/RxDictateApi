@@ -12,10 +12,15 @@ import type {
   CreateAnnouncementImageBody,
   ListAnnouncementRegistrationsQuery,
   ListAnnouncementsQuery,
+  SearchAnnouncementProductsQuery,
   UpdateAnnouncementBody,
 } from '../shared/announcement.schema';
 
 /* The console. */
+
+export const searchProducts = catchAsync(async (req, res) => {
+  sendData(res, await announcementService.searchProducts(parsedQuery<SearchAnnouncementProductsQuery>(req)));
+});
 
 export const listAnnouncements = catchAsync(async (req, res) => {
   const { announcements, meta } = await announcementService.listAnnouncements(parsedQuery<ListAnnouncementsQuery>(req));
