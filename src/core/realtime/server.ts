@@ -51,7 +51,7 @@ export const attachRealtime = (server: Server): RealtimeServer => {
       return;
     }
     const { origin } = request.headers;
-    if (origin && !config.cors.origins.includes(origin)) {
+    if (origin && !config.cors.allowsOrigin(origin)) {
       turnDown(socket, 403, 'Forbidden');
       return;
     }

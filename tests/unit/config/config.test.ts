@@ -84,6 +84,14 @@ describe('Config', () => {
       process.env.CORS_ORIGINS = 'http://localhost:8081';
       expect(load().cors.origins).toEqual(['http://localhost:8081']);
     });
+
+    test('an origin off the list is refused, unless the list is *', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.CORS_ORIGINS = 'http://localhost:8081';
+      expect(load().cors.allowsOrigin('https://anything.example')).toBe(false);
+      process.env.CORS_ORIGINS = '*';
+      expect(load().cors.allowsOrigin('https://anything.example')).toBe(true);
+    });
   });
 
   describe('INVITE_BASE_URL', () => {

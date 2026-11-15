@@ -70,6 +70,7 @@ const envSchema = z.object({
   /**
    * Comma separated list of origins the web app and the web portal are served
    * from. Setting it replaces the dev defaults below rather than adding to them.
+   * `*` lets any website call the API: for a test server, never real patients.
    */
   CORS_ORIGINS: csv(),
 
@@ -220,6 +221,8 @@ const defaultDevOrigins = [
   'http://localhost:19006',
 ];
 
+const corsOrigins = env.CORS_ORIGINS.length > 0 ? env.CORS_ORIGINS : defaultDevOrigins;
+
 /**
  * The first non-internal IPv4 address of this machine.
  *
@@ -276,7 +279,9 @@ const config = {
     fixedCode: env.NODE_ENV === 'production' ? undefined : env.OTP_FIXED_CODE,
   },
   cors: {
-    origins: env.CORS_ORIGINS.length > 0 ? env.CORS_ORIGINS : defaultDevOrigins,
+    origins: corsOrigins,
+    /** Whether a browser on this origin may call the API and open the live socket. */
+    allowsOrigin: (origin: string): boolean => corsOrigins.includes('*') || corsOrigins.includes(origin),
   },
   rateLimit: {
     windowMs: env.RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,

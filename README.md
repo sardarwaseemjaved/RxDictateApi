@@ -126,8 +126,9 @@ dev defaults (`http://localhost:3000`, `:5173`, `:8081`, `:19006`) rather than
 adding to them. The web app calls this API from the browser, and with the local
 storage driver it also PUTs report pages straight to `PUBLIC_API_URL`, so the
 web app's address must be on the list. In dev that is `http://localhost:5173`:
-a `.env` that sets `CORS_ORIGINS` has to include it itself. The native app
-sends no `Origin` and is never affected.
+a `.env` that sets `CORS_ORIGINS` has to include it itself. `CORS_ORIGINS=*`
+lets any website call the API, which suits a test server and nothing else. The
+native app sends no `Origin` and is never affected.
 
 **Bucket CORS, for production.** With `STORAGE_DRIVER=s3` the browser PUTs
 report pages straight to the bucket. That request is cross-origin, and the

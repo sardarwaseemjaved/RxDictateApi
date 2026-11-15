@@ -91,7 +91,7 @@ app.use(compression());
  */
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
-    if (!origin || config.cors.origins.includes(origin)) {
+    if (!origin || config.cors.allowsOrigin(origin)) {
       return callback(null, true);
     }
     return callback(new AppError('FORBIDDEN', 'Origin not allowed'));
