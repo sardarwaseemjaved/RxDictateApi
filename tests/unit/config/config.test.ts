@@ -1,7 +1,16 @@
 /**
  * config.ts does its work at module load, so each case here resets the module
  * registry and requires it again with a different environment.
+ *
+ * config.ts also loads .env on every require. That is stubbed out here, so a
+ * developer's own .env cannot put back a variable a case deleted: each case
+ * sees exactly the environment it set, on a laptop and in CI alike.
  */
+jest.mock('dotenv', () => {
+  const config = () => ({ parsed: {} });
+  return { __esModule: true, default: { config }, config };
+});
+
 describe('Config', () => {
   const original = process.env;
 
@@ -89,6 +98,8 @@ describe('Config', () => {
       process.env.NODE_ENV = 'development';
       process.env.CORS_ORIGINS = 'http://localhost:8081';
       expect(load().cors.allowsOrigin('https://anything.example')).toBe(false);
+      // A fresh load, or the require above answers again from the module cache.
+      jest.resetModules();
       process.env.CORS_ORIGINS = '*';
       expect(load().cors.allowsOrigin('https://anything.example')).toBe(true);
     });

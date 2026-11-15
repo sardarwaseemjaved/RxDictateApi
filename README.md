@@ -94,7 +94,7 @@ letting a missing variable become a runtime surprise. The full set:
 | `OTP_LOG_IN_DEV`                            | `true`                        | outside production, return the code as `devCode`                                                                        |
 | `CORS_ORIGINS`                              | dev localhosts                | **required in production**; must list the web app — see below                                                           |
 | `RATE_LIMIT_WINDOW_MINUTES`                 | `15`                          |                                                                                                                         |
-| `RATE_LIMIT_MAX`                            | `300`                         | the whole API                                                                                                           |
+| `RATE_LIMIT_MAX`                            | `300`                         | the whole API: per person when the request carries an access token this API signed, per IP when it doesn't              |
 | `AUTH_RATE_LIMIT_MAX`                       | `20`                          | sign-in                                                                                                                 |
 | `OTP_RATE_LIMIT_MAX`                        | `5`                           | keyed on the phone number, not the IP                                                                                   |
 | `VERIFY_RATE_LIMIT_MAX`                     | `30`                          | per minute per IP, both public verify routes together                                                                   |
@@ -128,7 +128,8 @@ storage driver it also PUTs report pages straight to `PUBLIC_API_URL`, so the
 web app's address must be on the list. In dev that is `http://localhost:5173`:
 a `.env` that sets `CORS_ORIGINS` has to include it itself. `CORS_ORIGINS=*`
 lets any website call the API, which suits a test server and nothing else. The
-native app sends no `Origin` and is never affected.
+native app is never affected: on Android it sends no `Origin`, and on iOS its
+live socket sends the API's own address, which the socket always accepts.
 
 **Bucket CORS, for production.** With `STORAGE_DRIVER=s3` the browser PUTs
 report pages straight to the bucket. That request is cross-origin, and the
@@ -1517,8 +1518,13 @@ it shows on every connect and reconnect. The contract is
    misses two pongs.
 
 Anything the app sends that is not a valid `auth` is ignored. A frame over 4 KB
-closes the socket. A browser's `Origin` must be one `CORS_ORIGINS` allows; the
-mobile app sends none and is let through, as on the HTTP API.
+closes the socket. A browser's `Origin` must be one `CORS_ORIGINS` allows. Two
+more are let through: no `Origin` (the Android app), and the server's own
+address - an `Origin` whose host is the request's `Host`, or behind a trusted
+proxy (`TRUST_PROXY`), its `X-Forwarded-Host` - which React Native sends on iOS.
+That is safe because a page's JavaScript can't set either header: a browser on
+another site always sends that site as `Origin` and the API as `Host`. The same
+host on another port is another site and is refused.
 
 **Topics.** Whoever made the change hears it too: they may have the app open on
 another device.
@@ -1629,6 +1635,7 @@ The suites that exist to hold the six rules down:
 | [tests/integration/realtime.test.ts](tests/integration/realtime.test.ts)                   | the realtime socket: every sign-in failure gives the HTTP code and closes; a fresh token keeps it open; who hears which topic; every row of the topics table sends exactly one message; lost access closes the right sockets; no message carries a name, phone or medical field                                                                                                      |
 | [tests/integration/realtimeTimers.test.ts](tests/integration/realtimeTimers.test.ts)       | under fake timers: an unsigned socket is closed after 10 s, the heartbeat goes out every 25 s, and a socket that stops answering pings is terminated                                                                                                                                                                                                                                 |
 | [tests/integration/verify.test.ts](tests/integration/verify.test.ts)                       | a printout's QR: approval makes a unique code, the backfill fills old ones, the public page answers `valid` or `replaced` with no name, phone, MR number or clinical section, every kind of miss is the same `NOT_FOUND`, the SVG decodes to the link, and the log keeps only the start of a code                                                                                    |
+| [tests/integration/generalRateLimit.test.ts](tests/integration/generalRateLimit.test.ts)   | the general limit counts each signed-in person on their own, so two people behind one address don't share it; anonymous requests and tokens this API didn't sign count by address                                                                                                                                                                                                    |
 | [tests/integration/verifyRateLimit.test.ts](tests/integration/verifyRateLimit.test.ts)     | the verify routes share their own bucket of 30 a minute, and the 31st answers `RATE_LIMITED`                                                                                                                                                                                                                                                                                         |
 | [tests/integration/organisations.test.ts](tests/integration/organisations.test.ts)         | old practices read as clinics after the backfill; `platform:init` makes one platform and one admin and a second run changes nothing; a platform member is `FORBIDDEN` from the clinic routes; a role that doesn't fit its organisation is refused; `can` on `/me`; specialties, province and city round-trip                                                                         |
 | [tests/integration/settings.test.ts](tests/integration/settings.test.ts)                   | the default when nothing is set; a person's value beats the clinic's unless the clinic locked it; a platform lock beats both; every kind of refusal is `VALIDATION_ERROR`; an assistant can't set the clinic's; changes are audited; `settings` reaches the person, the clinic or everyone                                                                                           |

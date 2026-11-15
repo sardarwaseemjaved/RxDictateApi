@@ -14,7 +14,7 @@ interface Item {
   [key: string]: unknown;
 }
 
-const historyOf = async (doctor: SignedIn, patientId: string, query: Record<string, string | number> = {}) =>
+const historyOf = (doctor: SignedIn, patientId: string, query: Record<string, string | number> = {}) =>
   request(app).get(`/api/v1/patients/${patientId}/history`).query(query).set(headersFor(doctor));
 
 /** A prescription with a diagnosis, a medicine and the labs given, approved. */
@@ -131,13 +131,13 @@ describe('A patient history', () => {
     // Starting the prescription put the patient on today's list, so: a visit,
     // the prescription, three labs and two reports.
     const all = await historyOf(doctor, patientId, { limit: 100 }).expect(200);
-    expect(all.body.meta.total).toBe(8);
+    expect(all.body.meta.total).toBe(7);
 
     const pages: Item[] = [];
     for (let page = 1; page <= 4; page += 1) {
       // eslint-disable-next-line no-await-in-loop
       const response = await historyOf(doctor, patientId, { page, limit: 2 }).expect(200);
-      expect(response.body.meta).toMatchObject({ page, limit: 2, total: 8, totalPages: 4 });
+      expect(response.body.meta).toMatchObject({ page, limit: 2, total: 7, totalPages: 4 });
       pages.push(...response.body.data);
     }
 

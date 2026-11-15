@@ -238,6 +238,32 @@ describe('Realtime', () => {
       expect(phoneApp.isOpen).toBe(true);
     });
 
+    test("the server's own address as Origin, which the iOS app sends, is let through; it is not on the CORS list", async () => {
+      const own = new URL(live.url.replace('ws:', 'http:')).origin;
+      expect(config.cors.allowsOrigin(own)).toBe(false);
+
+      const iosApp = track(await connect(live.url, { origin: own }));
+      expect(iosApp.isOpen).toBe(true);
+
+      // The same host on another port is another site.
+      const otherPort = `http://127.0.0.1:${Number(new URL(own).port) + 1}`;
+      await expect(connect(live.url, { origin: otherPort })).rejects.toThrow('403');
+    });
+
+    test('behind a trusted proxy, the host it forwarded counts as our own; without one it does not', async () => {
+      const proxied = { origin: 'https://api.rxdictate.example', headers: { 'X-Forwarded-Host': 'api.rxdictate.example' } };
+      const trusted = config.trustProxy;
+      try {
+        config.trustProxy = 0;
+        await expect(connect(live.url, proxied)).rejects.toThrow('403');
+        config.trustProxy = 1;
+        const viaProxy = track(await connect(live.url, proxied));
+        expect(viaProxy.isOpen).toBe(true);
+      } finally {
+        config.trustProxy = trusted;
+      }
+    });
+
     test('only the realtime path upgrades', async () => {
       await expect(connect(live.url.replace('/realtime', '/visits'))).rejects.toThrow('404');
     });
