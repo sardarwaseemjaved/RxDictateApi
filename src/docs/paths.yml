@@ -1079,6 +1079,12 @@ paths:
         for a reviewer only, are national rows with the same registration number, or the same brand,
         strength and form among active ones. A sender never sees who reviewed (reviewerId and the
         reviewer's history steps have by null). Another organisation's is NOT_FOUND.
+
+        For an announcement.create only, for the reviewer and the sender alike: allowance, the sending
+        company's announcement allowance and this month's use; and announcement, { product, image } -
+        the medicine payload.drugId names as that row is now ({ id, brand, strength }, whether or not
+        it is still active; null when there is none or it is gone) and a signed link to
+        payload.imageKey ({ url, expiresAt }, null when there is none). Both are null for every other type.
       security: [{ bearerAuth: [] }]
       responses:
         '200': { description: submissionDetailViewSchema }

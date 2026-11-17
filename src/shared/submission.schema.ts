@@ -4,7 +4,12 @@ import { organisationStatusSchema, organisationTypeSchema } from './roles';
 import { drugViewSchema } from './drug.schema';
 import { medicineFormSchema } from './prescription.schema';
 import { claimProductBodySchema, productFieldsSchema, updateProductBodySchema } from './company.schema';
-import { announcementAllowanceViewSchema, companyAnnouncementPayloadSchema } from './announcement.schema';
+import {
+  announcementAllowanceViewSchema,
+  announcementProductRefSchema,
+  companyAnnouncementPayloadSchema,
+  signedImageSchema,
+} from './announcement.schema';
 import { submissionStatusSchema, submissionTypeSchema, type SubmissionType } from './submissionStatus';
 
 export { submissionStatusSchema, submissionTypeSchema, submissionSummarySchema } from './submissionStatus';
@@ -112,6 +117,18 @@ export const submissionViewSchema = z.object({
 export type SubmissionView = z.infer<typeof submissionViewSchema>;
 
 /**
+ * What an `announcement.create` names, as it can be shown before approving
+ * makes a draft: the medicine `payload.drugId` names, as that row is now and
+ * whether or not it is still active (null when there is none, or the row is
+ * gone), and a signed link to `payload.imageKey` (null when there is none).
+ */
+export const submissionAnnouncementSchema = z.object({
+  product: announcementProductRefSchema.nullable(),
+  image: signedImageSchema.nullable(),
+});
+export type SubmissionAnnouncement = z.infer<typeof submissionAnnouncementSchema>;
+
+/**
  * `GET /submissions/:id`.
  *
  * - `current`: the live row as it is now, for an update, discontinuation,
@@ -122,12 +139,16 @@ export type SubmissionView = z.infer<typeof submissionViewSchema>;
  * - `allowance`: for an `announcement.create` only, the sending company's
  *   announcement allowance and this month's use, for the reviewer and the
  *   sender alike. Null for every other type.
+ * - `announcement`: for an `announcement.create` only, its medicine and image
+ *   (submissionAnnouncementSchema), for the reviewer and the sender alike.
+ *   Null for every other type.
  */
 export const submissionDetailViewSchema = z.object({
   submission: submissionViewSchema,
   current: drugViewSchema.nullable(),
   duplicates: z.array(drugViewSchema),
   allowance: announcementAllowanceViewSchema.nullable(),
+  announcement: submissionAnnouncementSchema.nullable(),
 });
 export type SubmissionDetailView = z.infer<typeof submissionDetailViewSchema>;
 

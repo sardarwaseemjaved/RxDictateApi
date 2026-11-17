@@ -38,7 +38,7 @@ import type { ClaimProductBody, ProductFields, UpdateProductBody } from '../shar
 import type { CompanyAnnouncementPayload } from '../shared/announcement.schema';
 import { nationalRows, toDrugView } from './drugAccess.service';
 import { announceMedicines } from './drugList.service';
-import { createFromSubmission } from './announcement.service';
+import { createFromSubmission, imageOf } from './announcement.service';
 import { allowanceViewFor } from './announcementAllowance.service';
 import { preparePayload } from './companyAnnouncement.service';
 
@@ -797,6 +797,24 @@ const duplicatesOf = async (submission: SubmissionDoc, current: DrugDoc | null):
     .limit(20);
 };
 
+/**
+ * What an announcement.create names: its medicine as that row is now, active
+ * or not, so a reviewer sees what was asked for, and a signed link to its
+ * image. The same for the reviewer and the sender: it names only the sender's
+ * own product and picture.
+ */
+const announcementPartOf = async (submission: SubmissionDoc): Promise<SubmissionDetailView['announcement']> => {
+  const { drugId, imageKey } = submission.payload ?? {};
+  const drug =
+    typeof drugId === 'string' && Types.ObjectId.isValid(drugId)
+      ? await Drug.findById(drugId).select('brand strength')
+      : null;
+  return {
+    product: drug ? { id: String(drug._id), brand: drug.brand, strength: drug.strength } : null,
+    image: await imageOf(typeof imageKey === 'string' && imageKey ? imageKey : null),
+  };
+};
+
 export const getSubmission = async (viewer: Viewer, id: string): Promise<SubmissionDetailView> => {
   const submission = await findFor(viewer, id);
   const reviewer = isReviewer(viewer);
@@ -806,6 +824,7 @@ export const getSubmission = async (viewer: Viewer, id: string): Promise<Submiss
     current: current ? toDrugView(current) : null,
     duplicates: reviewer ? (await duplicatesOf(submission, current)).map(toDrugView) : [],
     allowance: submission.type === 'announcement.create' ? await allowanceViewFor(submission.practiceId) : null,
+    announcement: submission.type === 'announcement.create' ? await announcementPartOf(submission) : null,
   };
 };
 

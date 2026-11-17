@@ -391,12 +391,15 @@ export type AudienceCountView = z.infer<typeof audienceCountViewSchema>;
  * Console views
  * ------------------------------------------------------------------ */
 
-const signedImageSchema = z.object({ url: z.string(), expiresAt: z.coerce.date() });
+/** A link to an announcement's image, signed for the usual lifetime. */
+export const signedImageSchema = z.object({ url: z.string(), expiresAt: z.coerce.date() });
+export type SignedImage = z.infer<typeof signedImageSchema>;
 
 const sponsorViewSchema = z.object({ id: objectIdSchema, name: z.string() });
 
 /** The product a `product` announcement is about, as doctors see it named. */
-const productViewSchema = z.object({ id: objectIdSchema, brand: z.string(), strength: z.string() });
+export const announcementProductRefSchema = z.object({ id: objectIdSchema, brand: z.string(), strength: z.string() });
+export type AnnouncementProductRef = z.infer<typeof announcementProductRefSchema>;
 
 /**
  * One person's own record of one announcement, on a row of
@@ -447,7 +450,7 @@ export const announcementViewSchema = z.object({
     })
     .nullable(),
   drugId: objectIdSchema.nullable(),
-  product: productViewSchema.nullable(),
+  product: announcementProductRefSchema.nullable(),
   sponsor: sponsorViewSchema.nullable(),
   /** A sponsor is set, or it is a product. Always labelled "Sponsored". */
   isSponsored: z.boolean(),
@@ -597,7 +600,7 @@ export const companyAnnouncementViewSchema = z.object({
   publishedAt: z.coerce.date().nullable(),
   /** The submission it came from, or null for one RxDictate wrote for the company. */
   submissionId: objectIdSchema.nullable(),
-  product: productViewSchema.nullable(),
+  product: announcementProductRefSchema.nullable(),
   stats: announcementStatsViewSchema,
 });
 export type CompanyAnnouncementView = z.infer<typeof companyAnnouncementViewSchema>;
@@ -626,7 +629,7 @@ export const announcementSlotViewSchema = z.object({
   event: announcementViewSchema.shape.event,
   sponsor: sponsorViewSchema.nullable(),
   isSponsored: z.boolean(),
-  product: productViewSchema.nullable(),
+  product: announcementProductRefSchema.nullable(),
   showUntil: z.coerce.date(),
   /** This person's own state. */
   reminded: z.boolean(),

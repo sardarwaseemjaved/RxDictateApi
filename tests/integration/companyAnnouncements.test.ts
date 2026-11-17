@@ -868,3 +868,71 @@ describe('Live updates', () => {
     expect(company.id).not.toBe(rival.id);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * The medicine and image a submission names
+ * ------------------------------------------------------------------ */
+
+describe("A company announcement's medicine and image in the review queue", () => {
+  const detailOf = async (actor: SignedIn, id: string) =>
+    (await request(app).get(`/api/v1/submissions/${id}`).set(headersFor(actor)).expect(200)).body.data;
+
+  test('the reviewer and the sender both see the product by name and the image by a signed link', async () => {
+    const { platformAdmin, companyEditor, company } = await theCast(90);
+    const product = await aProduct(company.id, 'Zentra');
+    const imageKey = (
+      await request(app)
+        .post('/api/v1/announcements/images')
+        .set(headersFor(companyEditor))
+        .send({ contentType: 'image/png', size: 2048 })
+        .expect(201)
+    ).body.data.fileKey;
+    const sent = (await send(companyEditor, { ...NEWS, kind: 'product', drugId: String(product._id), imageKey }).expect(201))
+      .body.data.id;
+
+    const expected = {
+      product: { id: String(product._id), brand: 'Zentra', strength: '250mg' },
+      image: { url: expect.any(String), expiresAt: expect.any(String) },
+    };
+    expect((await detailOf(platformAdmin, sent)).announcement).toEqual(expected);
+    expect((await detailOf(companyEditor, sent)).announcement).toEqual(expected);
+  });
+
+  test('an update with no image has neither', async () => {
+    const { platformAdmin, companyAdmin } = await theCast(91);
+    const sent = (await send(companyAdmin, NEWS).expect(201)).body.data.id;
+    expect((await detailOf(platformAdmin, sent)).announcement).toEqual({ product: null, image: null });
+  });
+
+  test('a medicine discontinued while it waits still comes back by name', async () => {
+    const { platformAdmin, companyAdmin, company } = await theCast(92);
+    const product = await aProduct(company.id, 'Zentra');
+    const sent = (await send(companyAdmin, { ...NEWS, kind: 'product', drugId: String(product._id) }).expect(201)).body.data
+      .id;
+    await Drug.updateOne({ _id: product._id }, { $set: { status: 'discontinued' } });
+
+    expect((await detailOf(platformAdmin, sent)).announcement).toEqual({
+      product: { id: String(product._id), brand: 'Zentra', strength: '250mg' },
+      image: null,
+    });
+  });
+
+  test('every other type has none', async () => {
+    const { platformAdmin, companyAdmin, company } = await theCast(93);
+    const product = await aProduct(company.id, 'Zentra');
+    const created = await request(app)
+      .post('/api/v1/company/products')
+      .set(headersFor(companyAdmin))
+      .send({ brand: 'Novel', strength: '10mg', registrationNo: 'R-NEW-1' })
+      .expect(201);
+    const updated = await request(app)
+      .patch(`/api/v1/company/products/${String(product._id)}`)
+      .set(headersFor(companyAdmin))
+      .send({ pack: '3x10' })
+      .expect(201);
+
+    [created, updated].forEach((response) => expect(response.body.data.announcement).toBeNull());
+    expect((await detailOf(platformAdmin, created.body.data.submission.id)).announcement).toBeNull();
+    expect((await detailOf(platformAdmin, updated.body.data.submission.id)).announcement).toBeNull();
+  });
+});
